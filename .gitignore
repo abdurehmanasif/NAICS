@@ -1,0 +1,7 @@
+venv/
+data/
+Documents/
+.env
+*.ipynb
+__pycache__/
+__init__.py
