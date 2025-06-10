@@ -8,24 +8,24 @@ A clean, modular FastAPI application for processing RFPs (Request for Proposals)
 app/
 ├── api/                     # API endpoints
 │   ├── __init__.py
-│   ├── scoring.py          # Proposal scoring endpoint
-│   └── generation.py       # Proposal generation endpoint
+│   ├── scoring.py           # Proposal scoring endpoint
+│   └── generation.py        # Proposal generation endpoint
 ├── models/                  # Pydantic models
 │   ├── __init__.py
-│   └── requests.py         # Request/response schemas
-├── services/               # Business logic
+│   └── requests.py          # Request/response schemas
+├── services/                # Business logic
 │   ├── __init__.py
 │   ├── document_processor_service.py
 │   ├── proposal_scorer_service.py
 │   ├── proposal_generator_service.py
 │   └── rfp_workflow_service.py
-├── config.py              # Configuration settings
-├── fastapi_app.py         # Main FastAPI application
-└── [legacy files...]      # Original files (can be removed)
+├── config.py                # Configuration settings
+├── main.py                  # Main FastAPI application
+└── __pycache__/             # Python cache files
 
-run_api.py                 # Application startup script
-requirements.txt           # Dependencies
-README_API.md             # This file
+run_api.py                   # Application startup script
+requirements.txt             # Dependencies
+README.md                    # Project documentation
 ```
 
 ## 🚀 Getting Started
@@ -65,44 +65,10 @@ README_API.md             # This file
 ### Proposal Scoring
 - **POST** `/api/v1/scoring/score-proposal`
 
-**Request Body:**
-```json
-{
-  "rfp_file": "path/to/rfp.pdf",
-  "proposal_file": "path/to/proposal.pdf", 
-  "naics_code": "541330",
-  "naics_code_description": "Engineering Services"
-}
-```
-
-**Response:**
-```json
-{
-  "score": 8.5,
-  "suggestion": "Strong proposal that addresses most requirements. Consider adding more detail on timeline and risk mitigation."
-}
-```
-
 ### Proposal Generation
 - **POST** `/api/v1/generation/generate-proposal`
 
-**Request Body:**
-```json
-{
-  "rfp_file": "path/to/rfp.pdf",
-  "knowledge_base_files": ["path/to/company_info.pdf", "path/to/past_proposals.pdf"],
-  "naics_code": "541330", 
-  "naics_code_description": "Engineering Services"
-}
-```
-
-**Response:**
-```json
-{
-  "output_file_path": "/path/to/generated_proposal.md",
-  "message": "Proposal successfully generated and saved to /path/to/generated_proposal.md"
-}
-```
+See the OpenAPI docs at `/docs` for full request/response schemas.
 
 ## 🧩 Architecture
 
