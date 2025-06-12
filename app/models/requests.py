@@ -5,8 +5,8 @@ from typing import List, Optional
 class ScoreProposalRequest(BaseModel):
     """Request schema for proposal scoring API"""
 
-    rfp_file: str = Field(..., description="HttpUrl to the RFP file")
-    proposal_file: str = Field(..., description="HttpUrl to the proposal file")
+    rfp_file_url: str = Field(..., description="HttpUrl to the RFP file")
+    proposal_file_url: str = Field(..., description="HttpUrl to the proposal file")
     naics_code: Optional[str] = Field(None, description="NAICS industry code")
     naics_code_description: Optional[str] = Field(
         None, description="NAICS code description"
@@ -25,8 +25,8 @@ class ScoreProposalResponse(BaseModel):
 class GenerateProposalRequest(BaseModel):
     """Request schema for proposal generation API"""
 
-    rfp_file: str = Field(..., description="HttpUrl to the RFP file")
-    knowledge_base_files: Optional[List[str]] = Field(
+    rfp_file_url: str = Field(..., description="HttpUrl to the RFP file")
+    knowledge_base_files_urls: Optional[List[str]] = Field(
         default=[], description="List of HttpUrls to the knowledge base files"
     )
     naics_code: Optional[str] = Field(None, description="NAICS industry code")

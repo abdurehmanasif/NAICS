@@ -8,6 +8,9 @@ langchain-huggingface
 # Vector Store and Embeddings
 faiss-cpu
 sentence-transformers
+PyPDF2
+PyPDFLoader
+UnstructuredFileLoader
 
 # Web Framework
 fastapi
@@ -16,3 +19,4 @@ uvicorn[standard]
 # Utilities
 python-dotenv
 pydantic
+boto3

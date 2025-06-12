@@ -25,7 +25,6 @@ class ProposalScorerService:
 
         if LLM_PROVIDER == "openai":
             logger.info(f"Using OpenAI model: {DEFAULT_LLM_MODEL_OPENAI}")
-            logger.info(f"Using OpenAI API key: {OPENAI_API_KEY}")
             self.llm = init_chat_model(
                 model=DEFAULT_LLM_MODEL_OPENAI,
                 model_provider="openai",

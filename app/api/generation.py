@@ -1,3 +1,4 @@
+import uuid
 from fastapi import APIRouter, HTTPException
 import logging
 
@@ -41,13 +42,15 @@ async def generate_proposal(
     - Saves the generated proposal to a markdown file
     """
     try:
-        logger.info(f"Received generation request for RFP: {request.rfp_file}")
-        logger.info(f"Knowledge base files: {request.knowledge_base_files}")
+        logger.info(f"Received generation request for RFP: {request.rfp_file_url}")
+        logger.info(f"Knowledge base files: {request.knowledge_base_files_urls}")
+        project_id = uuid.uuid4()
 
         # Call the workflow service
         output_file_path = workflow_service.generate_proposal(
-            rfp_file=request.rfp_file,
-            knowledge_base_files=request.knowledge_base_files or [],
+            project_id=project_id,
+            rfp_file_url=request.rfp_file_url,
+            knowledge_base_files_urls=request.knowledge_base_files_urls or [],
             naics_code=request.naics_code or "",
             naics_code_description=request.naics_code_description or "",
         )

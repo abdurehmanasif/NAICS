@@ -1,3 +1,4 @@
+import os
 from typing import Dict
 import logging
 from pathlib import Path
@@ -6,6 +7,7 @@ from fastapi import HTTPException
 from .document_processor_service import DocumentProcessorService
 from .proposal_scorer_service import ProposalScorerService
 from .proposal_generator_service import ProposalGeneratorService
+from .boto_service import BotoService
 from ..config import OUTPUT_DIR
 
 logger = logging.getLogger(__name__)
@@ -19,10 +21,12 @@ class RFPWorkflowService:
         self.doc_processor = DocumentProcessorService()
         self.scorer = ProposalScorerService()
         self.generator = ProposalGeneratorService()
+        self.boto_service = BotoService()
         logger.info("RFPWorkflowService initialized successfully")
 
     def score_proposal(
         self,
+        project_id: str,
         rfp_file: str,
         proposal_file: str,
         naics_code: str = "",
@@ -36,26 +40,48 @@ class RFPWorkflowService:
         logger.info(f"Proposal file: {proposal_file}")
         logger.info(f"NAICS code: {naics_code}")
         logger.info(f"NAICS code description: {naics_code_description}")
+        logger.info(f"Project ID: {project_id}")
+
+        # Create project directory
+        project_dir = f"{OUTPUT_DIR}/{project_id}"
+        os.makedirs(project_dir, exist_ok=True)
+        rfp_file_path = f"{project_dir}/rfp.pdf"
+        proposal_file_path = f"{project_dir}/proposal.pdf"
+
+        # Download files from S3
+        logger.info("Downloading RFP file from S3...")
+        self.boto_service.download_user_file(
+            public_url=rfp_file,
+            download_path=rfp_file_path,
+        )
+        logger.info("Downloading proposal file from S3...")
+        self.boto_service.download_user_file(
+            public_url=proposal_file,
+            download_path=proposal_file_path,
+        )
 
         try:
             # Validate file paths
-            if not Path(rfp_file).exists():
-                logger.error(f"RFP file not found: {rfp_file}")
-                return {"score": 0, "suggestion": f"RFP file not found: {rfp_file}"}
-
-            if not Path(proposal_file).exists():
-                logger.error(f"Proposal file not found: {proposal_file}")
+            if not Path(rfp_file_path).exists():
+                logger.error(f"RFP file not found: {rfp_file_path}")
                 return {
                     "score": 0,
-                    "suggestion": f"Proposal file not found: {proposal_file}",
+                    "suggestion": f"RFP file not found: {rfp_file_path}",
+                }
+
+            if not Path(proposal_file_path).exists():
+                logger.error(f"Proposal file not found: {proposal_file_path}")
+                return {
+                    "score": 0,
+                    "suggestion": f"Proposal file not found: {proposal_file_path}",
                 }
 
             # Extract text from files
             logger.info("Extracting RFP text...")
-            rfp_text = self.doc_processor.extract_rfp_text(rfp_file)
+            rfp_text = self.doc_processor.extract_rfp_text(rfp_file_path)
 
             logger.info("Extracting proposal text...")
-            proposal_text = self.doc_processor.extract_rfp_text(proposal_file)
+            proposal_text = self.doc_processor.extract_rfp_text(proposal_file_path)
 
             # Score with single LLM call
             logger.info("Scoring proposal with LLM...")
@@ -83,6 +109,7 @@ class RFPWorkflowService:
 
     def generate_proposal(
         self,
+        project_id: str,
         rfp_file: str,
         knowledge_base_files: list = [],
         naics_code: str = "",
@@ -94,17 +121,38 @@ class RFPWorkflowService:
         logger.info("=" * 50)
         logger.info(f"RFP file: {rfp_file}")
         logger.info(f"Knowledge base files: {knowledge_base_files}")
+        logger.info(f"Project ID: {project_id}")
 
         try:
+            # Create project directory
+            project_dir = f"{OUTPUT_DIR}/{project_id}"
+            os.makedirs(project_dir, exist_ok=True)
+            rfp_file_path = f"{project_dir}/rfp.pdf"
+            kb_file_paths = []
+
+            # Download files from S3
+            logger.info("Downloading RFP file from S3...")
+            self.boto_service.download_user_file(
+                public_url=rfp_file,
+                download_path=rfp_file_path,
+            )
+            for kb_file in knowledge_base_files:
+                logger.info("Downloading knowledge base file from S3...")
+                self.boto_service.download_user_file(
+                    public_url=kb_file,
+                    download_path=f"{project_dir}/kb_{kb_file.split('/')[-1]}",
+                )
+                kb_file_paths.append(f"{project_dir}/kb_{kb_file.split('/')[-1]}")
+
             # Extract RFP text
             logger.info("Extracting RFP text...")
-            rfp_text = self.doc_processor.extract_rfp_text(rfp_file)
+            rfp_text = self.doc_processor.extract_rfp_text(rfp_file_path)
 
             # Extract knowledge base text if provided
             kb_text = ""
             if knowledge_base_files:
                 logger.info("Loading knowledge base documents...")
-                kb_docs = self.doc_processor.load_documents(knowledge_base_files)
+                kb_docs = self.doc_processor.load_documents(kb_file_paths)
                 kb_text = "\n\n".join([doc.page_content for doc in kb_docs])
                 logger.info(f"Knowledge base text length: {len(kb_text)} characters")
 

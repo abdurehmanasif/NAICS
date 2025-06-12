@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException
 import logging
+import uuid
 
 from ..models.requests import ScoreProposalRequest, ScoreProposalResponse, ErrorResponse
 from ..services.rfp_workflow_service import RFPWorkflowService
@@ -35,13 +36,15 @@ async def score_proposal(request: ScoreProposalRequest) -> ScoreProposalResponse
     """
     try:
         logger.info(
-            f"Received scoring request for RFP: {request.rfp_file}, Proposal: {request.proposal_file}"
+            f"Received scoring request for RFP: {request.rfp_file_url}, Proposal: {request.proposal_file_url}"
         )
+        project_id = uuid.uuid4()
 
         # Call the workflow service
         result = workflow_service.score_proposal(
-            rfp_file=request.rfp_file,
-            proposal_file=request.proposal_file,
+            project_id=project_id,
+            rfp_file_url=request.rfp_file_url,
+            proposal_file_url=request.proposal_file_url,
             naics_code=request.naics_code or "",
             naics_code_description=request.naics_code_description or "",
         )
