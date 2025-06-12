@@ -3,6 +3,7 @@ import boto3
 import logging
 import os
 import dotenv
+import urllib.parse
 
 dotenv.load_dotenv()
 AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
@@ -109,9 +110,19 @@ class BotoService:
         :return: Boolean indicating success or failure
         """
         try:
-            # Extract the object key from the public URL
-            # Example URL: https://voxbee.s3.amazonaws.com/user_id/feature/project/file.wav
-            object_key = public_url.split(f"{bucket}.s3.amazonaws.com/")[1]
+            # Extract the object key from the public URL robustly
+            # Handles URLs like: https://bucket.s3.amazonaws.com/path/to/file.pdf
+            # and also with URL-encoded characters
+            parsed = urllib.parse.urlparse(public_url)
+            if not parsed.netloc or bucket not in parsed.netloc:
+                logger.error(f"Malformed or non-matching S3 URL: {public_url}")
+                return False
+            # Remove leading '/' from path
+            object_key = parsed.path.lstrip("/")
+            if not object_key:
+                logger.error(f"Could not extract object key from URL: {public_url}")
+                return False
+            object_key = urllib.parse.unquote(object_key)
 
             # Create directory if it doesn't exist
             os.makedirs(os.path.dirname(download_path), exist_ok=True)
