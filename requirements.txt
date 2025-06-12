@@ -1,18 +1,9 @@
 # Core AI and Language Model libraries
 langchain
-langchain-google-genai
 langchain-community
 langchain-core
-google-generativeai
 langchain-openai
 langchain-huggingface
-
-# Document Processing
-PyPDF2
-pdfplumber
-python-docx
-openpyxl
-pandas
 
 # Vector Store and Embeddings
 faiss-cpu
@@ -25,11 +16,3 @@ uvicorn[standard]
 # Utilities
 python-dotenv
 pydantic
-numpy
-typing-extensions
-tenacity
-
-# New additions from the code block
-pypdf
-unstructured[pdf]
-python-multipart

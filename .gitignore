@@ -5,3 +5,4 @@ Documents/
 *.ipynb
 __pycache__/
 __init__.py
+*.log
