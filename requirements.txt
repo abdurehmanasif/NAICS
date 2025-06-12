@@ -9,7 +9,6 @@ langchain-huggingface
 faiss-cpu
 sentence-transformers
 PyPDF2
-UnstructuredFileLoader
 
 # Web Framework
 fastapi
