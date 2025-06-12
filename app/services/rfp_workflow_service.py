@@ -27,8 +27,8 @@ class RFPWorkflowService:
     def score_proposal(
         self,
         project_id: str,
-        rfp_file: str,
-        proposal_file: str,
+        rfp_file_url: str,
+        proposal_file_url: str,
         naics_code: str = "",
         naics_code_description: str = "",
     ) -> Dict:
@@ -36,8 +36,8 @@ class RFPWorkflowService:
         logger.info("=" * 50)
         logger.info("STARTING PROPOSAL SCORING")
         logger.info("=" * 50)
-        logger.info(f"RFP file: {rfp_file}")
-        logger.info(f"Proposal file: {proposal_file}")
+        logger.info(f"RFP file: {rfp_file_url}")
+        logger.info(f"Proposal file: {proposal_file_url}")
         logger.info(f"NAICS code: {naics_code}")
         logger.info(f"NAICS code description: {naics_code_description}")
         logger.info(f"Project ID: {project_id}")
@@ -51,12 +51,12 @@ class RFPWorkflowService:
         # Download files from S3
         logger.info("Downloading RFP file from S3...")
         self.boto_service.download_user_file(
-            public_url=rfp_file,
+            public_url=rfp_file_url,
             download_path=rfp_file_path,
         )
         logger.info("Downloading proposal file from S3...")
         self.boto_service.download_user_file(
-            public_url=proposal_file,
+            public_url=proposal_file_url,
             download_path=proposal_file_path,
         )
 
@@ -110,8 +110,8 @@ class RFPWorkflowService:
     def generate_proposal(
         self,
         project_id: str,
-        rfp_file: str,
-        knowledge_base_files: list = [],
+        rfp_file_url: str,
+        knowledge_base_files_urls: list = [],
         naics_code: str = "",
         naics_code_description: str = "",
     ) -> str:
@@ -119,8 +119,8 @@ class RFPWorkflowService:
         logger.info("=" * 50)
         logger.info("STARTING PROPOSAL GENERATION")
         logger.info("=" * 50)
-        logger.info(f"RFP file: {rfp_file}")
-        logger.info(f"Knowledge base files: {knowledge_base_files}")
+        logger.info(f"RFP file: {rfp_file_url}")
+        logger.info(f"Knowledge base files: {knowledge_base_files_urls}")
         logger.info(f"Project ID: {project_id}")
 
         try:
@@ -133,16 +133,16 @@ class RFPWorkflowService:
             # Download files from S3
             logger.info("Downloading RFP file from S3...")
             self.boto_service.download_user_file(
-                public_url=rfp_file,
+                public_url=rfp_file_url,
                 download_path=rfp_file_path,
             )
-            for kb_file in knowledge_base_files:
+            for kb_file_url in knowledge_base_files_urls:
                 logger.info("Downloading knowledge base file from S3...")
                 self.boto_service.download_user_file(
-                    public_url=kb_file,
-                    download_path=f"{project_dir}/kb_{kb_file.split('/')[-1]}",
+                    public_url=kb_file_url,
+                    download_path=f"{project_dir}/kb_{kb_file_url.split('/')[-1]}",
                 )
-                kb_file_paths.append(f"{project_dir}/kb_{kb_file.split('/')[-1]}")
+                kb_file_paths.append(f"{project_dir}/kb_{kb_file_url.split('/')[-1]}")
 
             # Extract RFP text
             logger.info("Extracting RFP text...")
@@ -150,7 +150,7 @@ class RFPWorkflowService:
 
             # Extract knowledge base text if provided
             kb_text = ""
-            if knowledge_base_files:
+            if kb_file_paths:
                 logger.info("Loading knowledge base documents...")
                 kb_docs = self.doc_processor.load_documents(kb_file_paths)
                 kb_text = "\n\n".join([doc.page_content for doc in kb_docs])
