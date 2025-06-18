@@ -4,12 +4,13 @@ langchain-community
 langchain-core
 langchain-openai
 langchain-huggingface
+langchain-unstructured
 
 # Vector Store and Embeddings
 faiss-cpu
 sentence-transformers
 pypdf
-unstructured
+unstructured[all-docs]
 
 # Web Framework
 fastapi
