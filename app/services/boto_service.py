@@ -87,7 +87,6 @@ class BotoService:
                 S3_BUCKET_NAME,
                 object_key,
                 ExtraArgs={
-                    "ACL": "public-read",
                     "ContentType": content_type,
                     "ContentDisposition": "inline",
                 },

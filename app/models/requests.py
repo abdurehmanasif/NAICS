@@ -38,8 +38,8 @@ class GenerateProposalRequest(BaseModel):
 class GenerateProposalResponse(BaseModel):
     """Response schema for proposal generation API"""
 
-    output_file_path: str = Field(
-        ..., description="HttpUrl to the generated proposal file"
+    public_url: str = Field(
+        ..., description="Public URL to the generated proposal DOCX file"
     )
     message: str = Field(..., description="Success message")
 

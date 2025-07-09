@@ -1,167 +1,144 @@
-# RFP Processing FastAPI Application
+# NAICS Proposal Service
 
-A clean, modular FastAPI application for processing RFPs (Request for Proposals) with AI-powered proposal scoring and generation capabilities.
+A production-grade FastAPI micro-service that leverages state-of-the-art Large Language Models (LLMs) to automate the entire Request-For-Proposal (RFP) lifecycle – from parsing complex solicitations to delivering a polished, client-ready proposal.
 
-## 🏗️ Project Structure
+## ✨ Features
+1. **One-Click Proposal Generation** – Provide an RFP URL plus any supporting "knowledge-base" documents (past performance, capability statements, resumes, etc.). The service writes an executive-level proposal in a single LLM call.
+2. **Seamless S3 Integration** – The final proposal is rendered to a professional **DOCX** file and uploaded back to your S3 bucket. The API returns a public URL – perfect for instant download or email delivery.
+3. **Proposal Scoring** – Benchmark an existing proposal against the RFP to get a 0-10 score and AI-driven improvement suggestions.
+4. **Multi-Format Ingestion** – Accepts PDF, DOCX, TXT and more via LangChain loaders.
+5. **Pluggable LLMs** – Bring your own **OpenAI** or **Google Generative AI** keys. Swap providers with an env var.
+6. **Built-in NAICS Validation** – Supply a NAICS code/description to guide the LLM toward industry-specific compliance.
+7. **Container Ready** – Minimal footprint, stateless operation – deploy to ECS, K8s, Heroku or Fly.io with zero code changes.
 
-```
+---
+
+## 🗂️ Project Structure
+```text
 app/
-├── api/                     # API endpoints
-│   ├── __init__.py
-│   ├── scoring.py           # Proposal scoring endpoint
-│   └── generation.py        # Proposal generation endpoint
-├── models/                  # Pydantic models
-│   ├── __init__.py
-│   └── requests.py          # Request/response schemas
-├── services/                # Business logic
-│   ├── __init__.py
-│   ├── document_processor_service.py
-│   ├── proposal_scorer_service.py
-│   ├── proposal_generator_service.py
-│   └── rfp_workflow_service.py
-├── config.py                # Configuration settings
-├── main.py                  # Main FastAPI application
-└── __pycache__/             # Python cache files
-
-run_api.py                   # Application startup script
-requirements.txt             # Dependencies
-README.md                    # Project documentation
+ ├─ api/                       # REST endpoints (generation & scoring)
+ ├─ services/                  # Core business logic
+ ├─ models/                    # Pydantic schemas
+ └─ ...
+Documents/                    # Runtime artefacts (generated proposals, etc.)
+docs/                         # Misc documentation helpers
 ```
 
-## 🚀 Getting Started
-
-### Prerequisites
-
-1. Python 3.8 or higher
-2. Required API keys in your `.env` file:
-   ```
-   OPENAI_API_KEY=your_openai_key
-   GOOGLE_API_KEY=your_google_key
-   LLM_PROVIDER=google_genai  # or openai
-   ```
-
-### Installation
-
-1. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-2. Start the application:
-   ```bash
-   python run_api.py
-   ```
-
-3. Open your browser to view the API documentation:
-   - Swagger UI: http://localhost:8000/docs
-   - ReDoc: http://localhost:8000/redoc
-
-## 📡 API Endpoints
-
-### Health Check
-- **GET** `/health` - Check API health status
-- **GET** `/` - API information and available endpoints
-
-### Proposal Scoring
-- **POST** `/api/v1/scoring/score-proposal`
-
-### Proposal Generation
-- **POST** `/api/v1/generation/generate-proposal`
-
-See the OpenAPI docs at `/docs` for full request/response schemas.
-
-## 🧩 Architecture
-
-### Services Layer
-- **DocumentProcessorService**: Handles document loading and text extraction
-- **ProposalScorerService**: AI-powered proposal evaluation
-- **ProposalGeneratorService**: AI-powered proposal generation  
-- **RFPWorkflowService**: Orchestrates the complete workflow
-
-### API Layer
-- **scoring.py**: REST endpoints for proposal scoring
-- **generation.py**: REST endpoints for proposal generation
-- **models/requests.py**: Pydantic schemas for request/response validation
-
-### Configuration
-- Centralized configuration in `config.py`
-- Environment-based settings via `.env` file
-- Support for multiple LLM providers (OpenAI, Google)
-
-## 🛠️ Key Features
-
-1. **Clean Architecture**: Separation of concerns with services, API, and models
-2. **Type Safety**: Full Pydantic validation for requests and responses
-3. **Error Handling**: Comprehensive error handling with appropriate HTTP status codes
-4. **Documentation**: Auto-generated OpenAPI/Swagger documentation
-5. **Logging**: Structured logging throughout the application
-6. **CORS Support**: Configurable CORS for frontend integration
-7. **Health Checks**: Built-in health check endpoints
-
-## 🔧 Development
-
-### Running in Development Mode
+## 🚀 Quick Start
+### 1. Clone & Install
 ```bash
+git clone <your-fork>
+cd NAICS
+python -m venv venv && source venv/bin/activate  # Windows: venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+### 2. Configure Environment
+Create a `.env` file in the project root:
+```dotenv
+# LLM Provider (openai | google_genai)
+LLM_PROVIDER=openai
+OPENAI_API_KEY=sk-...
+# or
+# GOOGLE_API_KEY=AIza...
+
+# Embeddings (openai | huggingface)
+EMBEDDING_PROVIDER=openai
+
+# AWS / S3
+AWS_ACCESS_KEY_ID=AKIA...
+AWS_SECRET_ACCESS_KEY=...
+AWS_REGION=us-east-1
+S3_BUCKET_NAME=my-proposal-bucket
+```
+
+### 3. Run the Service
+```bash
+python run_api.py  # uvicorn with reload & swagger docs
+```
+Access Swagger UI at `http://localhost:8000/docs`.
+
+---
+
+## 🌐 API Reference (v1)
+| Method | Path                                    | Purpose                                   |
+| ------ | --------------------------------------- | ----------------------------------------- |
+| POST   | `/api/v1/generation/generate-proposal`  | Generate a proposal DOCX from an RFP      |
+| POST   | `/api/v1/scoring/score-proposal`        | Score an existing proposal                |
+
+### Generate Proposal
+`POST /api/v1/generation/generate-proposal`
+
+**Request Body**
+```json5
+{
+  "rfp_file_url": "https://bucket.s3.amazonaws.com/rfps/rfp.pdf",
+  "knowledge_base_files_urls": [
+    "https://bucket.s3.amazonaws.com/kb/capability_statement.pdf",
+    "https://bucket.s3.amazonaws.com/kb/team_resume.docx"
+  ],
+  "naics_code": "541330",                 // optional
+  "naics_code_description": "Engineering Services" // optional
+}
+```
+
+**Success Response (200)**
+```json
+{
+  "public_url": "https://bucket.s3.amazonaws.com/user_123/proposal_generation/abcd1234/generated_proposal.docx",
+  "message": "Proposal successfully generated and uploaded. Access it here: https://..."
+}
+```
+
+### Score Proposal
+`POST /api/v1/scoring/score-proposal`
+
+**Request Body**
+```json5
+{
+  "rfp_file_url": "https://bucket.s3.amazonaws.com/rfps/rfp.pdf",
+  "proposal_file_url": "https://bucket.s3.amazonaws.com/prev/proposal.docx",
+  "naics_code": "541330",
+  "naics_code_description": "Engineering Services"
+}
+```
+
+**Success Response (200)**
+```json
+{
+  "score": 8.7,
+  "suggestion": "Strengthen the risk-mitigation section and reference ISO-9001 compliance."
+}
+```
+
+---
+
+## 🏗️ Architecture Overview
+```text
+┌──────────┐      ┌─────────────────────────┐        ┌────────────┐
+│  Client  ├──▶──▶  FastAPI REST Endpoints  ├──▶────▶│   S3 Bucket│
+└──────────┘      │  (Generation / Scoring)│        └────────────┘
+                  └─────────┬──────────────┘
+                            │
+                            ▼
+                   RFPWorkflowService
+          ┌──────────────┬──────────────┬────────────► Parses documents / uploads output
+          │              │              │
+          ▼              ▼              ▼
+DocumentProcessor   ProposalGenerator   ProposalScorer
+(extract & split)   (LLM call)          (LLM eval)
+```
+
+## 🧑‍💻 Local Development
+```bash
+# Run with auto-reload
 python run_api.py
-```
-This starts the server with auto-reload enabled.
-
-### Testing the API
-
-#### Using curl:
-```bash
-# Score a proposal
-curl -X POST "http://localhost:8000/api/v1/scoring/score-proposal" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "rfp_file": "Documents/RFQ+W911SG-24-Q-0101_Redacted.pdf",
-    "proposal_file": "data/HDEC04-16-R-0020-Lemoore Proposal.pdf",
-    "naics_code": "541330",
-    "naics_code_description": "Engineering Services"
-  }'
-
-# Generate a proposal  
-curl -X POST "http://localhost:8000/api/v1/generation/generate-proposal" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "rfp_file": "Documents/RFQ+W911SG-24-Q-0101_Redacted.pdf",
-    "knowledge_base_files": ["data/HDEC04-16-R-0020-Lemoore Proposal.pdf"],
-    "naics_code": "541330",
-    "naics_code_description": "Engineering Services"
-  }'
+# Lint & format (requires pre-commit installation)
+pre-commit run --all-files
 ```
 
-#### Using Python requests:
-```python
-import requests
+## ✅ Testing
+Unit tests are in progress – coming soon. Feel free to contribute!
 
-# Score a proposal
-response = requests.post("http://localhost:8000/api/v1/scoring/score-proposal", json={
-    "rfp_file": "Documents/RFQ+W911SG-24-Q-0101_Redacted.pdf",
-    "proposal_file": "data/HDEC04-16-R-0020-Lemoore Proposal.pdf", 
-    "naics_code": "541330",
-    "naics_code_description": "Engineering Services"
-})
-print(response.json())
-```
-
-## 📝 Notes
-
-- File paths in requests should be relative to the application's working directory
-- The application supports PDF and other document formats via the UnstructuredFileLoader
-- Generated proposals are saved as Markdown files in the `output/` directory
-- API responses include comprehensive error messages for debugging
-
-## 🔄 Migration from Legacy Code
-
-The original functionality has been preserved but restructured:
-- `main.py` functions are now in `services/rfp_workflow_service.py`
-- Business logic is separated into individual service classes
-- API endpoints provide the same functionality via HTTP REST interface
-- All configuration remains in `config.py`
-
-You can safely remove the original files once you've verified the new API works correctly:
-- `main.py`
-- `proposal_generator.py` 
-- `proposal_scorer.py`
-- `document_processor.py` 
+## 📝 License
+[MIT](LICENSE)

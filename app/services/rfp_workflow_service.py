@@ -7,6 +7,7 @@ import mimetypes
 import urllib.parse
 import re
 import uuid
+from docx import Document
 
 from .document_processor_service import DocumentProcessorService
 from .proposal_scorer_service import ProposalScorerService
@@ -298,17 +299,34 @@ class RFPWorkflowService:
                 rfp_text, kb_text, naics_code, naics_code_description
             )
 
-            # Save proposal
-            output_file = OUTPUT_DIR / "generated_proposal.md"
-            with open(output_file, "w", encoding="utf-8") as f:
-                f.write(proposal)
+            # Convert proposal text to DOCX and upload to S3
+            logger.info("Converting proposal to DOCX format...")
+            docx_path = f"{project_dir}/generated_proposal.docx"
+            document = Document()
+            for paragraph in proposal.split("\n\n"):
+                document.add_paragraph(paragraph)
+            document.save(docx_path)
+
+            logger.info("Uploading generated proposal to S3...")
+            success, public_url = self.boto_service.upload_user_file(
+                file_name=docx_path,
+                user_id=str(project_id),
+                feature_name="proposal_generation",
+                project_id=str(project_id),
+                object_name=Path(docx_path).name,
+            )
+            if not success or not public_url:
+                raise HTTPException(
+                    status_code=500,
+                    detail="Failed to upload generated proposal to storage.",
+                )
 
             logger.info("=" * 50)
             logger.info("PROPOSAL GENERATION COMPLETE")
-            logger.info(f"Proposal saved to: {output_file}")
+            logger.info(f"Proposal uploaded to: {public_url}")
             logger.info("=" * 50)
 
-            return str(output_file)
+            return public_url
 
         except ValueError as e:
             logger.error(f"File processing error: {e}")
@@ -323,10 +341,10 @@ class RFPWorkflowService:
                 detail=f"Error in generate_proposal: {e}",
             )
         finally:
-            # Clean up downloaded files
-            for file_path in downloaded_files:
+            # Clean up downloaded files and generated docx
+            for file_path in downloaded_files + [locals().get("docx_path")]:
                 try:
-                    if Path(file_path).exists():
+                    if file_path and Path(file_path).exists():
                         os.remove(file_path)
                         logger.debug(f"Cleaned up: {file_path}")
                 except Exception as cleanup_error:

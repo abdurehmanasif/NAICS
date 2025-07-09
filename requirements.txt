@@ -20,3 +20,5 @@ uvicorn[standard]
 python-dotenv
 pydantic
 boto3
+python-docx
+reportlab

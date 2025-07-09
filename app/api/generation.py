@@ -44,10 +44,10 @@ async def generate_proposal(
     try:
         logger.info(f"Received generation request for RFP: {request.rfp_file_url}")
         logger.info(f"Knowledge base files: {request.knowledge_base_files_urls}")
-        project_id = uuid.uuid4()
+        project_id = str(uuid.uuid4())
 
         # Call the workflow service
-        output_file_path = workflow_service.generate_proposal(
+        public_url = workflow_service.generate_proposal(
             project_id=project_id,
             rfp_file_url=request.rfp_file_url,
             knowledge_base_files_urls=request.knowledge_base_files_urls or [],
@@ -56,8 +56,8 @@ async def generate_proposal(
         )
 
         return GenerateProposalResponse(
-            output_file_path=output_file_path,
-            message=f"Proposal successfully generated and saved to {output_file_path}",
+            public_url=public_url,
+            message=f"Proposal successfully generated and uploaded. Access it here: {public_url}",
         )
 
     except FileNotFoundError as e:

@@ -6,3 +6,4 @@ Documents/
 __pycache__/
 __init__.py
 *.log
+output/
