@@ -22,3 +22,6 @@ pydantic
 boto3
 python-docx
 reportlab
+pytesseract
+Pillow
+pdfplumber
