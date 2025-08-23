@@ -9,9 +9,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/scoring", tags=["scoring"])
 
-# Global service instance (could be dependency injected in production)
-workflow_service = RFPWorkflowService()
-
 
 @router.post(
     "/score-proposal",
@@ -35,6 +32,7 @@ async def score_proposal(request: ScoreProposalRequest) -> ScoreProposalResponse
     - Returns a numerical score (0-10) and detailed suggestions
     """
     try:
+        workflow_service = RFPWorkflowService()
         logger.info(
             f"Received scoring request for RFP: {request.rfp_file_url}, Proposal: {request.proposal_file_url}"
         )

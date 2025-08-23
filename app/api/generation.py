@@ -13,9 +13,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/generation", tags=["generation"])
 
-# Global service instance (could be dependency injected in production)
-workflow_service = RFPWorkflowService()
-
 
 @router.post(
     "/generate-proposal",
@@ -42,6 +39,7 @@ async def generate_proposal(
     - Saves the generated proposal to a markdown file
     """
     try:
+        workflow_service = RFPWorkflowService()
         logger.info(f"Received generation request for RFP: {request.rfp_file_url}")
         logger.info(f"Knowledge base files: {request.knowledge_base_files_urls}")
         project_id = str(uuid.uuid4())
