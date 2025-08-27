@@ -1,19 +1,20 @@
-import os
-from typing import Dict
 import logging
-from pathlib import Path
-from fastapi import HTTPException
 import mimetypes
-import urllib.parse
+import os
 import re
+import urllib.parse
 import uuid
-from docx import Document
+from pathlib import Path
+from typing import Dict
 
-from .document_processor_service import DocumentProcessorService
-from .proposal_scorer_service import ProposalScorerService
-from .proposal_generator_service import ProposalGeneratorService
-from .boto_service import BotoService
+from docx import Document
+from fastapi import HTTPException
+
 from ..config import OUTPUT_DIR
+from .boto_service import BotoService
+from .document_processor_service import DocumentProcessorService
+from .proposal_generator_service import ProposalGeneratorService
+from .proposal_scorer_service import ProposalScorerService
 
 logger = logging.getLogger(__name__)
 
@@ -195,7 +196,7 @@ class RFPWorkflowService:
             logger.info(f"Final Score: {result['score']}/10")
             logger.info(f"Suggestion: {result['suggestion']}")
 
-            if not result["score"] or not result["suggestion"]:
+            if result["score"] is None or result["suggestion"] is None:
                 raise HTTPException(
                     status_code=400,
                     detail="Scoring failed. Please try again. If the problem persists, please contact support.",
