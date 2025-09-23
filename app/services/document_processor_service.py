@@ -1,27 +1,23 @@
+import io
+import logging
 from pathlib import Path
 from typing import List
-from langchain_community.document_loaders import PyPDFLoader, UnstructuredFileLoader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.schema import Document
-from langchain_community.embeddings import OpenAIEmbeddings
-import logging
-from langchain_huggingface import HuggingFaceEmbeddings
-from langchain.chat_models import init_chat_model
-import pytesseract
-from PIL import Image
-import io
+
 import pdfplumber
+import pytesseract
+from langchain.chat_models import init_chat_model
+from langchain.schema import Document
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_community.document_loaders import PyPDFLoader, UnstructuredFileLoader
+from PIL import Image
 
 from ..config import (
-    EMBEDDING_PROVIDER,
-    EMBEDDING_MODEL_OPENAI,
-    EMBEDDING_MODEL_HUGGINGFACE,
-    CHUNK_SIZE,
     CHUNK_OVERLAP,
-    LLM_PROVIDER,
-    DEFAULT_LLM_MODEL_OPENAI,
+    CHUNK_SIZE,
     DEFAULT_LLM_MODEL_GOOGLE,
+    DEFAULT_LLM_MODEL_OPENAI,
     GOOGLE_API_KEY,
+    LLM_PROVIDER,
     OPENAI_API_KEY,
 )
 
@@ -32,14 +28,6 @@ class DocumentProcessorService:
     """Handles document loading, processing, and vector store creation."""
 
     def __init__(self):
-        if EMBEDDING_PROVIDER == "huggingface":
-            self.embeddings = HuggingFaceEmbeddings(
-                model_name=EMBEDDING_MODEL_HUGGINGFACE
-            )
-        elif EMBEDDING_PROVIDER == "openai":
-            self.embeddings = OpenAIEmbeddings(model=EMBEDDING_MODEL_OPENAI)
-        else:
-            raise ValueError(f"Unsupported embedding provider: {EMBEDDING_PROVIDER}")
         self.text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=CHUNK_SIZE,
             chunk_overlap=CHUNK_OVERLAP,
@@ -154,7 +142,7 @@ class DocumentProcessorService:
                         # Append OCR text to corresponding pages
                         for i, doc in enumerate(docs):
                             if i < len(page_image_texts) and page_image_texts[i]:
-                                doc.page_content += f"\n\n[OCR Text from Images on Page {i+1}]:\n{page_image_texts[i]}"
+                                doc.page_content += f"\n\n[OCR Text from Images on Page {i + 1}]:\n{page_image_texts[i]}"
 
                 # For image files, use OCR directly
                 elif file_path.lower().endswith(
@@ -234,7 +222,7 @@ class DocumentProcessorService:
                                         page_image_text.append(extracted_text)
                             except Exception as e:
                                 logger.warning(
-                                    f"Failed to process image {img_num+1} on page {page_num+1}: {e}"
+                                    f"Failed to process image {img_num + 1} on page {page_num + 1}: {e}"
                                 )
 
                     # Join all image texts for this page

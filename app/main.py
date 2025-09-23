@@ -1,9 +1,11 @@
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 import logging
 
-from .api.scoring import router as scoring_router
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
 from .api.generation import router as generation_router
+from .api.scoring import router as scoring_router
+from .api.summarization import router as summarization_router
 
 # Configure logging
 logging.basicConfig(
@@ -38,6 +40,7 @@ app.add_middleware(
 # Include API routers
 app.include_router(scoring_router, prefix="/api/v1")
 app.include_router(generation_router, prefix="/api/v1")
+app.include_router(summarization_router, prefix="/api/v1")
 
 
 @app.get("/")
@@ -50,6 +53,7 @@ async def root():
         "endpoints": {
             "scoring": "/api/v1/scoring/score-proposal",
             "generation": "/api/v1/generation/generate-proposal",
+            "summarization": "/api/v1/summarization/summarize-rfp",
         },
     }
 

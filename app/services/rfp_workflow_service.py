@@ -15,6 +15,7 @@ from .boto_service import BotoService
 from .document_processor_service import DocumentProcessorService
 from .proposal_generator_service import ProposalGeneratorService
 from .proposal_scorer_service import ProposalScorerService
+from .rfp_summary_service import RFPSummaryService
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,7 @@ class RFPWorkflowService:
         self.doc_processor = DocumentProcessorService()
         self.scorer = ProposalScorerService()
         self.generator = ProposalGeneratorService()
+        self.summary_service = RFPSummaryService()
         self.boto_service = BotoService()
         logger.info("RFPWorkflowService initialized successfully")
 
@@ -143,6 +145,8 @@ class RFPWorkflowService:
         # Create project directory
         project_dir = f"{OUTPUT_DIR}/{project_id}"
         os.makedirs(project_dir, exist_ok=True)
+        rfp_file_path = None
+        proposal_file_path = None
 
         try:
             rfp_ext = self._get_ext_from_url(rfp_file_url)
@@ -220,12 +224,13 @@ class RFPWorkflowService:
             )
         finally:
             try:
-                if "rfp_file_path" in locals() and Path(rfp_file_path).exists():
-                    os.remove(rfp_file_path)
                 if (
-                    "proposal_file_path" in locals()
+                    rfp_file_path
+                    and proposal_file_path
+                    and Path(rfp_file_path).exists()
                     and Path(proposal_file_path).exists()
                 ):
+                    os.remove(rfp_file_path)
                     os.remove(proposal_file_path)
                 logger.debug("Cleaned up temporary files")
             except Exception as cleanup_error:
@@ -267,11 +272,11 @@ class RFPWorkflowService:
             kb_file_paths = []
             for i, kb_file_url in enumerate(knowledge_base_files_urls):
                 logger.info(
-                    f"Processing knowledge base file {i+1}/{len(knowledge_base_files_urls)}"
+                    f"Processing knowledge base file {i + 1}/{len(knowledge_base_files_urls)}"
                 )
 
                 kb_ext = self._get_ext_from_url(kb_file_url)
-                kb_safe_name = self._get_safe_filename(kb_file_url, f"kb_{i+1}")
+                kb_safe_name = self._get_safe_filename(kb_file_url, f"kb_{i + 1}")
                 kb_file_path = f"{project_dir}/{kb_safe_name}{kb_ext}"
                 downloaded_files.append(kb_file_path)
 
@@ -350,3 +355,126 @@ class RFPWorkflowService:
                         logger.debug(f"Cleaned up: {file_path}")
                 except Exception as cleanup_error:
                     logger.warning(f"Failed to cleanup {file_path}: {cleanup_error}")
+
+    def summarize_rfp(
+        self,
+        project_id: str,
+        rfp_file_url: str,
+        proposal_file_url: str = "",
+    ) -> Dict:
+        """Summarize RFP and estimate cost - single LLM call."""
+        logger.info("=" * 50)
+        logger.info("STARTING RFP SUMMARIZATION AND COST ESTIMATION")
+        logger.info("=" * 50)
+        logger.info(f"RFP file: {rfp_file_url}")
+        logger.info(f"Proposal file: {proposal_file_url}")
+        logger.info(f"Project ID: {project_id}")
+
+        # Create project directory
+        project_dir = f"{OUTPUT_DIR}/{project_id}"
+        os.makedirs(project_dir, exist_ok=True)
+
+        rfp_file_path = None
+        proposal_file_path = None
+
+        try:
+            rfp_ext = self._get_ext_from_url(rfp_file_url)
+
+            # Create safe filename for RFP
+            rfp_safe_name = self._get_safe_filename(rfp_file_url, "rfp")
+            rfp_file_path = f"{project_dir}/{rfp_safe_name}{rfp_ext}"
+
+            # Download RFP file from S3
+            logger.info("Downloading RFP file from S3...")
+            self.boto_service.download_user_file(
+                public_url=rfp_file_url,
+                download_path=rfp_file_path,
+            )
+
+            # Validate RFP file path
+            if not Path(rfp_file_path).exists():
+                logger.error(f"RFP file not found: {rfp_file_path}")
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"RFP file not found: {rfp_file_path}",
+                )
+
+            # Extract RFP text
+            logger.info("Extracting RFP text...")
+            rfp_text = self.doc_processor.extract_rfp_text(rfp_file_path)
+
+            # Handle optional proposal file
+            proposal_text = ""
+            if proposal_file_url:
+                try:
+                    proposal_ext = self._get_ext_from_url(proposal_file_url)
+                    proposal_safe_name = self._get_safe_filename(
+                        proposal_file_url, "proposal"
+                    )
+                    proposal_file_path = (
+                        f"{project_dir}/{proposal_safe_name}{proposal_ext}"
+                    )
+
+                    # Download proposal file from S3
+                    logger.info("Downloading proposal file from S3...")
+                    self.boto_service.download_user_file(
+                        public_url=proposal_file_url,
+                        download_path=proposal_file_path,
+                    )
+
+                    # Extract proposal text
+                    logger.info("Extracting proposal text...")
+                    proposal_text = self.doc_processor.extract_rfp_text(
+                        proposal_file_path
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to process proposal file: {e}, proceeding without it"
+                    )
+                    proposal_file_path = None
+
+            # Summarize RFP and estimate cost with single LLM call
+            logger.info("Summarizing RFP and estimating cost with LLM...")
+            result = self.summary_service.summarize_rfp_and_estimate_cost(
+                rfp_text, proposal_text
+            )
+
+            logger.info("=" * 50)
+            logger.info("SUMMARIZATION AND COST ESTIMATION COMPLETE")
+            logger.info(f"Summary points: {len(result['rfp_summary'])}")
+            logger.info(
+                f"Cost range: ${result['estimated_cost']['range_low']} - ${result['estimated_cost']['range_high']}"
+            )
+            logger.info(f"Confidence: {result['estimated_cost']['confidence_level']}")
+
+            if not result["rfp_summary"] or not result["estimated_cost"]:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Summarization failed. Please try again. If the problem persists, please contact support.",
+                )
+
+            logger.info("=" * 50)
+
+            return result
+
+        except ValueError as e:
+            logger.error(f"File processing error: {e}")
+            raise HTTPException(
+                status_code=400,
+                detail=f"File processing error: {e}",
+            )
+        except Exception as e:
+            logger.error(f"Error in summarize_rfp: {e}", exc_info=True)
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error in summarization workflow: {e}",
+            )
+        finally:
+            try:
+                # Clean up temporary files
+                for file_path in [rfp_file_path, proposal_file_path]:
+                    if file_path and Path(file_path).exists():
+                        os.remove(file_path)
+                        logger.debug(f"Cleaned up: {file_path}")
+            except Exception as cleanup_error:
+                logger.warning(f"Failed to cleanup files: {cleanup_error}")

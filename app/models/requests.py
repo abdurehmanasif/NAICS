@@ -1,5 +1,6 @@
-from pydantic import BaseModel, Field
 from typing import List, Optional
+
+from pydantic import BaseModel, Field
 
 
 class ScoreProposalRequest(BaseModel):
@@ -42,6 +43,45 @@ class GenerateProposalResponse(BaseModel):
         ..., description="Public URL to the generated proposal DOCX file"
     )
     message: str = Field(..., description="Success message")
+
+
+class SummarizeRFPRequest(BaseModel):
+    """Request schema for RFP summarization and budget estimation API"""
+
+    rfp_file_url: str = Field(..., description="HttpUrl to the RFP file")
+    proposal_file_url: Optional[str] = Field(
+        None, description="HttpUrl to the proposal file (optional)"
+    )
+
+
+class RFPSummary(BaseModel):
+    """Schema for RFP summary bullet points"""
+
+    summary_points: List[str] = Field(
+        ..., description="List of key summary points about the RFP"
+    )
+
+
+class CostEstimate(BaseModel):
+    """Schema for cost estimation"""
+
+    range_low: int = Field(..., description="Lower bound of estimated cost range")
+    range_high: int = Field(..., description="Upper bound of estimated cost range")
+    confidence_level: str = Field(..., description="Confidence level: low/medium/high")
+    basis_of_estimate: str = Field(
+        ..., description="Explanation of how the estimate was derived"
+    )
+
+
+class SummarizeRFPResponse(BaseModel):
+    """Response schema for RFP summarization and budget estimation API"""
+
+    rfp_summary: List[str] = Field(
+        ..., description="Key summary points of RFP requirements"
+    )
+    estimated_cost: CostEstimate = Field(
+        ..., description="Estimated cost range and basis"
+    )
 
 
 class ErrorResponse(BaseModel):
