@@ -301,13 +301,50 @@ Generate a complete, professional proposal that follows all these guidelines and
 IMPORTANT: Address every RFP requirement explicitly and provide specific, actionable responses rather than generic statements. Use the knowledge base information strategically to demonstrate capabilities and past performance.
 </execution_instruction>"""
 
+rfp_identification_template: str = """<personality>
+You are an expert government contracting analyst specializing in identifying RFP documents.
+</personality>
+
+<context>
+DOCUMENTS TO ANALYZE:
+{documents_with_filenames}
+</context>
+
+<analysis_criteria>
+<rfp_indicators>
+- Solicitation number (e.g., "Solicitation No:", "RFQ", "RFP No.")
+- Statement of Work (SOW) or Performance Work Statement (PWS)
+- Evaluation criteria and scoring methodology
+- Submission deadlines and requirements
+- Federal Acquisition Regulation (FAR) clauses
+- NAICS codes and size standards
+- Contract type information
+- Government points of contact
+</rfp_indicators>
+</analysis_criteria>
+
+<output_format>
+{{
+    "identified_rfp_filename": "filename_of_main_rfp.pdf",
+    "confidence_level": "high",
+    "reasoning": "Brief explanation of why this document was identified as the main RFP"
+}}
+</output_format>
+
+<instructions>
+1. Analyze each document's content for RFP indicators
+2. Select the document with the most comprehensive solicitation requirements
+3. Provide confidence level: high, medium, or low
+4. Explain reasoning briefly
+</instructions>"""
+
 summary_and_budget_template: str = """<personality>
 You are an expert government contracting cost analyst with 15+ years of experience estimating federal contract costs. You specialize in analyzing RFPs and providing realistic cost estimates based on industry standards, historical data, and government contracting norms.
 </personality>
 
 <context>
-RFP REQUIREMENTS: {rfp_text}
-PROPOSAL CONTENT: {proposal_text}
+MAIN RFP DOCUMENT: {rfp_text}
+SUPPORTING PROPOSAL DOCUMENTS: {proposal_text}
 </context>
 
 <analysis_objectives>

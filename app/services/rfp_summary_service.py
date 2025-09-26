@@ -1,13 +1,16 @@
 import json
 import logging
 import re
-from typing import Dict
+from typing import Dict, List, Tuple
 
 from langchain.chat_models import init_chat_model
 from langchain.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
-from app.services.prompts import summary_and_budget_template
+from app.services.prompts import (
+    rfp_identification_template,
+    summary_and_budget_template,
+)
 
 from ..config import (
     DEFAULT_LLM_MODEL_GOOGLE,
@@ -44,6 +47,206 @@ class RFPSummaryService:
             )
 
         logger.info("RFPSummaryService initialized successfully")
+
+    def identify_main_rfp(
+        self, documents_with_filenames: List[Tuple[str, str]]
+    ) -> Dict:
+        """Identify which document is the main RFP from a list of documents."""
+        logger.info("Starting RFP identification")
+        logger.info(f"Number of documents to analyze: {len(documents_with_filenames)}")
+
+        if not documents_with_filenames:
+            logger.error("No documents provided for RFP identification")
+            return {
+                "identified_rfp_filename": "",
+                "confidence_level": "low",
+                "reasoning": "No documents provided",
+            }
+
+        if len(documents_with_filenames) == 1:
+            logger.info("Only one document provided, using it as RFP")
+            return {
+                "identified_rfp_filename": documents_with_filenames[0][0],
+                "confidence_level": "high",
+                "reasoning": "Only one document provided",
+            }
+
+        # Format documents for LLM analysis
+        formatted_docs = ""
+        for filename, content in documents_with_filenames:
+            # Truncate content to avoid token limits
+            truncated_content = content[:2000] if content else ""
+            formatted_docs += (
+                f"\n\nFILENAME: {filename}\nCONTENT:\n{truncated_content}\n"
+            )
+            formatted_docs += "=" * 80
+
+        prompt = PromptTemplate(
+            input_variables=["documents_with_filenames"],
+            template=rfp_identification_template,
+        )
+
+        chain = prompt | self.llm | StrOutputParser()
+
+        try:
+            logger.info("Invoking LLM for RFP identification...")
+            response = chain.invoke({"documents_with_filenames": formatted_docs})
+
+            logger.info("Raw LLM response for identification received")
+            logger.info(f"Response: {response}")
+
+            # Parse JSON response
+            result = self._parse_identification_response(response)
+
+            # Validate that the identified filename exists in our documents
+            filenames = [doc[0] for doc in documents_with_filenames]
+            if result["identified_rfp_filename"] not in filenames:
+                logger.warning(
+                    f"LLM identified filename not in document list: {result['identified_rfp_filename']}"
+                )
+                # Default to first document
+                result["identified_rfp_filename"] = filenames[0]
+                result["confidence_level"] = "low"
+                result["reasoning"] = (
+                    "LLM identified unknown filename, defaulted to first document"
+                )
+
+            logger.info(f"Identified RFP: {result['identified_rfp_filename']}")
+            return result
+
+        except Exception as e:
+            logger.error(f"Error identifying RFP: {e}", exc_info=True)
+            # Default to first document
+            return {
+                "identified_rfp_filename": documents_with_filenames[0][0],
+                "confidence_level": "low",
+                "reasoning": f"Error during identification, defaulted to first document: {str(e)}",
+            }
+
+    def _parse_identification_response(self, response: str) -> Dict:
+        """Parse the JSON response from RFP identification."""
+        if not response:
+            raise ValueError("Empty response from LLM")
+
+        # Method 1: Direct JSON parsing
+        try:
+            result = json.loads(response.strip())
+            logger.info("Successfully parsed identification JSON directly")
+            return self._validate_identification_result(result)
+        except json.JSONDecodeError as e:
+            logger.warning(f"Direct JSON parsing failed: {e}")
+
+        # Method 2: Extract JSON using regex
+        try:
+            json_match = re.search(
+                r'\{[^{}]*"identified_rfp_filename"[^{}]*\}',
+                response,
+                re.DOTALL,
+            )
+            if json_match:
+                json_str = json_match.group()
+                result = json.loads(json_str)
+                logger.info("Successfully parsed extracted identification JSON")
+                return self._validate_identification_result(result)
+        except (json.JSONDecodeError, AttributeError) as e:
+            logger.warning(f"Regex JSON extraction failed: {e}")
+
+        # Fallback
+        logger.error("Failed to parse identification response")
+        raise ValueError(f"Could not parse identification response: {response}")
+
+    def _validate_identification_result(self, result: Dict) -> Dict:
+        """Validate and clean the identification result."""
+        if not isinstance(result, dict):
+            raise ValueError(f"Result is not a dictionary: {type(result)}")
+
+        # Ensure required fields exist
+        if "identified_rfp_filename" not in result:
+            result["identified_rfp_filename"] = ""
+
+        if "confidence_level" not in result:
+            result["confidence_level"] = "low"
+
+        if "reasoning" not in result:
+            result["reasoning"] = "No reasoning provided"
+
+        # Validate confidence level
+        valid_confidence = ["low", "medium", "high"]
+        if result["confidence_level"] not in valid_confidence:
+            result["confidence_level"] = "low"
+
+        return result
+
+    def summarize_multiple_docs_and_estimate_cost(
+        self,
+        rfp_documents: List[Tuple[str, str]],
+        proposal_documents: List[Tuple[str, str]] = None,
+    ) -> Dict:
+        """Identify main RFP from multiple documents, then summarize and estimate cost."""
+        logger.info("Starting multi-document RFP analysis")
+
+        if not rfp_documents:
+            logger.error("No RFP documents provided")
+            return {
+                "identified_rfp_filename": "",
+                "rfp_summary": ["Error: No RFP documents provided"],
+                "estimated_cost": {
+                    "range_low": 0,
+                    "range_high": 0,
+                    "confidence_level": "low",
+                    "basis_of_estimate": "No documents provided for analysis",
+                },
+            }
+
+        # Step 1: Identify the main RFP
+        identification_result = self.identify_main_rfp(rfp_documents)
+        identified_filename = identification_result["identified_rfp_filename"]
+
+        # Step 2: Get the content of the identified RFP
+        rfp_text = ""
+        for filename, content in rfp_documents:
+            if filename == identified_filename:
+                rfp_text = content
+                break
+
+        if not rfp_text:
+            logger.error(
+                f"Could not find content for identified RFP: {identified_filename}"
+            )
+            return {
+                "identified_rfp_filename": identified_filename,
+                "rfp_summary": ["Error: Could not find content for identified RFP"],
+                "estimated_cost": {
+                    "range_low": 0,
+                    "range_high": 0,
+                    "confidence_level": "low",
+                    "basis_of_estimate": "Could not access identified RFP content",
+                },
+            }
+
+        # Step 3: Prepare proposal text (combine all proposal documents)
+        proposal_text = ""
+        if proposal_documents:
+            proposal_texts = []
+            for filename, content in proposal_documents:
+                if content and content.strip():
+                    proposal_texts.append(f"Document: {filename}\n{content}")
+            proposal_text = "\n\n".join(proposal_texts)
+
+        # Step 4: Summarize and estimate cost
+        summary_result = self.summarize_rfp_and_estimate_cost(rfp_text, proposal_text)
+
+        # Step 5: Add identification info to result
+        result = {
+            "identified_rfp_filename": identified_filename,
+            "rfp_summary": summary_result["rfp_summary"],
+            "estimated_cost": summary_result["estimated_cost"],
+        }
+
+        logger.info(
+            f"Multi-document analysis complete. Identified RFP: {identified_filename}"
+        )
+        return result
 
     def summarize_rfp_and_estimate_cost(
         self,

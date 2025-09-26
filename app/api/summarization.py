@@ -23,39 +23,42 @@ router = APIRouter(prefix="/summarization", tags=["summarization"])
         400: {"model": ErrorResponse},
         500: {"model": ErrorResponse},
     },
-    summary="Summarize RFP requirements and estimate costs",
-    description="Analyze an RFP document to provide a concise summary of requirements and estimate the total contract cost. Optionally include a proposal document for enhanced analysis.",
+    summary="Summarize RFP requirements and estimate costs from multiple documents",
+    description="Analyze multiple documents to identify the main RFP, provide a concise summary of requirements, and estimate the total contract cost. Optionally include proposal documents for enhanced analysis.",
 )
 async def summarize_rfp(
     request: SummarizeRFPRequest,
 ) -> SummarizeRFPResponse:
     """
-    Summarize RFP requirements and estimate costs.
+    Summarize RFP requirements and estimate costs from multiple documents.
 
     This endpoint:
-    - Extracts text from the RFP document
-    - Optionally loads a proposal document for context
-    - Uses AI to create a concise executive summary of RFP requirements
+    - Extracts text from multiple potential RFP documents
+    - Uses AI to identify which document is the main RFP
+    - Optionally loads multiple proposal documents for context
+    - Creates a concise executive summary of RFP requirements
     - Provides a realistic cost estimate based on industry standards
-    - Returns confidence level and basis for the estimate
+    - Returns the identified RFP filename, confidence level and basis for the estimate
     """
     try:
-        if not request.rfp_file_url or not request.proposal_file_url:
+        if not request.rfp_file_urls:
             raise HTTPException(
                 status_code=400,
-                detail={"error": "RFP file URL and proposal file URL are required"},
+                detail={"error": "At least one RFP file URL is required"},
             )
         workflow_service = RFPWorkflowService()
-        logger.info(f"Received summarization request for RFP: {request.rfp_file_url}")
-        if request.proposal_file_url:
-            logger.info(f"Proposal file: {request.proposal_file_url}")
+        logger.info(
+            f"Received summarization request for RFP files: {request.rfp_file_urls}"
+        )
+        if request.proposal_file_urls:
+            logger.info(f"Proposal files: {request.proposal_file_urls}")
         project_id = str(uuid.uuid4())
 
         # Call the workflow service
         result = workflow_service.summarize_rfp(
             project_id=project_id,
-            rfp_file_url=request.rfp_file_url,
-            proposal_file_url=request.proposal_file_url,
+            rfp_file_urls=request.rfp_file_urls,
+            proposal_file_urls=request.proposal_file_urls or [],
         )
 
         # Check if there was an error in the summarization
@@ -69,7 +72,9 @@ async def summarize_rfp(
             )
 
         return SummarizeRFPResponse(
-            rfp_summary=result["rfp_summary"], estimated_cost=result["estimated_cost"]
+            identified_rfp_filename=result.get("identified_rfp_filename", ""),
+            rfp_summary=result["rfp_summary"],
+            estimated_cost=result["estimated_cost"],
         )
 
     except HTTPException:

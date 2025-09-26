@@ -48,9 +48,11 @@ class GenerateProposalResponse(BaseModel):
 class SummarizeRFPRequest(BaseModel):
     """Request schema for RFP summarization and budget estimation API"""
 
-    rfp_file_url: str = Field(..., description="HttpUrl to the RFP file")
-    proposal_file_url: Optional[str] = Field(
-        None, description="HttpUrl to the proposal file (optional)"
+    rfp_file_urls: List[str] = Field(
+        ..., description="List of HttpUrls to potential RFP files"
+    )
+    proposal_file_urls: Optional[List[str]] = Field(
+        default=[], description="List of HttpUrls to proposal files (optional)"
     )
 
 
@@ -76,6 +78,9 @@ class CostEstimate(BaseModel):
 class SummarizeRFPResponse(BaseModel):
     """Response schema for RFP summarization and budget estimation API"""
 
+    identified_rfp_filename: str = Field(
+        ..., description="Filename of the document identified as the main RFP"
+    )
     rfp_summary: List[str] = Field(
         ..., description="Key summary points of RFP requirements"
     )

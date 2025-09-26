@@ -5,7 +5,7 @@ import re
 import urllib.parse
 import uuid
 from pathlib import Path
-from typing import Dict
+from typing import Dict, List
 
 from docx import Document
 from fastapi import HTTPException
@@ -359,95 +359,134 @@ class RFPWorkflowService:
     def summarize_rfp(
         self,
         project_id: str,
-        rfp_file_url: str,
-        proposal_file_url: str = "",
+        rfp_file_urls: List[str],
+        proposal_file_urls: List[str] = None,
     ) -> Dict:
-        """Summarize RFP and estimate cost - single LLM call."""
+        """Summarize RFP and estimate cost - handles multiple documents."""
         logger.info("=" * 50)
-        logger.info("STARTING RFP SUMMARIZATION AND COST ESTIMATION")
+        logger.info("STARTING MULTI-DOCUMENT RFP SUMMARIZATION AND COST ESTIMATION")
         logger.info("=" * 50)
-        logger.info(f"RFP file: {rfp_file_url}")
-        logger.info(f"Proposal file: {proposal_file_url}")
+        logger.info(f"RFP files: {rfp_file_urls}")
+        logger.info(f"Proposal files: {proposal_file_urls}")
         logger.info(f"Project ID: {project_id}")
+
+        if not rfp_file_urls:
+            raise HTTPException(
+                status_code=400,
+                detail="At least one RFP file URL is required",
+            )
 
         # Create project directory
         project_dir = f"{OUTPUT_DIR}/{project_id}"
         os.makedirs(project_dir, exist_ok=True)
 
-        rfp_file_path = None
-        proposal_file_path = None
+        downloaded_files = []
 
         try:
-            rfp_ext = self._get_ext_from_url(rfp_file_url)
+            # Download and process RFP files
+            rfp_documents = []
+            for i, rfp_url in enumerate(rfp_file_urls):
+                try:
+                    rfp_ext = self._get_ext_from_url(rfp_url)
+                    rfp_safe_name = self._get_safe_filename(rfp_url, f"rfp_{i + 1}")
+                    rfp_file_path = f"{project_dir}/{rfp_safe_name}{rfp_ext}"
+                    downloaded_files.append(rfp_file_path)
 
-            # Create safe filename for RFP
-            rfp_safe_name = self._get_safe_filename(rfp_file_url, "rfp")
-            rfp_file_path = f"{project_dir}/{rfp_safe_name}{rfp_ext}"
+                    # Download RFP file from S3
+                    logger.info(f"Downloading RFP file {i + 1} from S3...")
+                    self.boto_service.download_user_file(
+                        public_url=rfp_url,
+                        download_path=rfp_file_path,
+                    )
 
-            # Download RFP file from S3
-            logger.info("Downloading RFP file from S3...")
-            self.boto_service.download_user_file(
-                public_url=rfp_file_url,
-                download_path=rfp_file_path,
-            )
+                    # Validate file exists
+                    if not Path(rfp_file_path).exists():
+                        logger.error(f"RFP file not found: {rfp_file_path}")
+                        continue
 
-            # Validate RFP file path
-            if not Path(rfp_file_path).exists():
-                logger.error(f"RFP file not found: {rfp_file_path}")
+                    # Extract text
+                    logger.info(f"Extracting text from RFP file {i + 1}...")
+                    rfp_text = self.doc_processor.extract_rfp_text(rfp_file_path)
+
+                    # Get just the filename for identification
+                    filename = Path(rfp_file_path).name
+                    rfp_documents.append((filename, rfp_text))
+
+                except Exception as e:
+                    logger.warning(f"Failed to process RFP file {rfp_url}: {e}")
+                    continue
+
+            if not rfp_documents:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"RFP file not found: {rfp_file_path}",
+                    detail="Failed to process any RFP files",
                 )
 
-            # Extract RFP text
-            logger.info("Extracting RFP text...")
-            rfp_text = self.doc_processor.extract_rfp_text(rfp_file_path)
+            # Download and process proposal files (optional)
+            proposal_documents = []
+            if proposal_file_urls:
+                for i, proposal_url in enumerate(proposal_file_urls):
+                    try:
+                        proposal_ext = self._get_ext_from_url(proposal_url)
+                        proposal_safe_name = self._get_safe_filename(
+                            proposal_url, f"proposal_{i + 1}"
+                        )
+                        proposal_file_path = (
+                            f"{project_dir}/{proposal_safe_name}{proposal_ext}"
+                        )
+                        downloaded_files.append(proposal_file_path)
 
-            # Handle optional proposal file
-            proposal_text = ""
-            if proposal_file_url:
-                try:
-                    proposal_ext = self._get_ext_from_url(proposal_file_url)
-                    proposal_safe_name = self._get_safe_filename(
-                        proposal_file_url, "proposal"
-                    )
-                    proposal_file_path = (
-                        f"{project_dir}/{proposal_safe_name}{proposal_ext}"
-                    )
+                        # Download proposal file from S3
+                        logger.info(f"Downloading proposal file {i + 1} from S3...")
+                        self.boto_service.download_user_file(
+                            public_url=proposal_url,
+                            download_path=proposal_file_path,
+                        )
 
-                    # Download proposal file from S3
-                    logger.info("Downloading proposal file from S3...")
-                    self.boto_service.download_user_file(
-                        public_url=proposal_file_url,
-                        download_path=proposal_file_path,
-                    )
+                        # Validate file exists
+                        if not Path(proposal_file_path).exists():
+                            logger.warning(
+                                f"Proposal file not found: {proposal_file_path}"
+                            )
+                            continue
 
-                    # Extract proposal text
-                    logger.info("Extracting proposal text...")
-                    proposal_text = self.doc_processor.extract_rfp_text(
-                        proposal_file_path
-                    )
-                except Exception as e:
-                    logger.warning(
-                        f"Failed to process proposal file: {e}, proceeding without it"
-                    )
-                    proposal_file_path = None
+                        # Extract text
+                        logger.info(f"Extracting text from proposal file {i + 1}...")
+                        proposal_text = self.doc_processor.extract_rfp_text(
+                            proposal_file_path
+                        )
 
-            # Summarize RFP and estimate cost with single LLM call
-            logger.info("Summarizing RFP and estimating cost with LLM...")
-            result = self.summary_service.summarize_rfp_and_estimate_cost(
-                rfp_text, proposal_text
+                        # Get just the filename for identification
+                        filename = Path(proposal_file_path).name
+                        proposal_documents.append((filename, proposal_text))
+
+                    except Exception as e:
+                        logger.warning(
+                            f"Failed to process proposal file {proposal_url}: {e}"
+                        )
+                        continue
+
+            # Analyze documents and get summary
+            logger.info("Analyzing documents with LLM...")
+            result = self.summary_service.summarize_multiple_docs_and_estimate_cost(
+                rfp_documents, proposal_documents if proposal_documents else None
             )
 
             logger.info("=" * 50)
-            logger.info("SUMMARIZATION AND COST ESTIMATION COMPLETE")
-            logger.info(f"Summary points: {len(result['rfp_summary'])}")
+            logger.info("MULTI-DOCUMENT SUMMARIZATION AND COST ESTIMATION COMPLETE")
             logger.info(
-                f"Cost range: ${result['estimated_cost']['range_low']} - ${result['estimated_cost']['range_high']}"
+                f"Identified RFP: {result.get('identified_rfp_filename', 'N/A')}"
             )
-            logger.info(f"Confidence: {result['estimated_cost']['confidence_level']}")
+            logger.info(f"Summary points: {len(result.get('rfp_summary', []))}")
+            if result.get("estimated_cost"):
+                logger.info(
+                    f"Cost range: ${result['estimated_cost']['range_low']} - ${result['estimated_cost']['range_high']}"
+                )
+                logger.info(
+                    f"Confidence: {result['estimated_cost']['confidence_level']}"
+                )
 
-            if not result["rfp_summary"] or not result["estimated_cost"]:
+            if not result.get("rfp_summary") or not result.get("estimated_cost"):
                 raise HTTPException(
                     status_code=400,
                     detail="Summarization failed. Please try again. If the problem persists, please contact support.",
@@ -472,7 +511,7 @@ class RFPWorkflowService:
         finally:
             try:
                 # Clean up temporary files
-                for file_path in [rfp_file_path, proposal_file_path]:
+                for file_path in downloaded_files:
                     if file_path and Path(file_path).exists():
                         os.remove(file_path)
                         logger.debug(f"Cleaned up: {file_path}")
