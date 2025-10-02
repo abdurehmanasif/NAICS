@@ -51,10 +51,10 @@ For {naics_code} ({naics_code_description}):
 - **9-10**: Exceptional - Outstanding response, clear winner
 
 ## OUTPUT REQUIREMENT:
-{{
+{{{{
     "score": 7,
     "suggestion": "Specific explanation of score with actionable compliance and technical improvement recommendations"
-}}
+}}}}
 
 **RFP Requirements:** {rfp_text}
 **Proposal to Evaluate:** {proposal_text}
@@ -185,11 +185,11 @@ M.3 Cost/Price (30%)
 
 
 ## OUTPUT FORMAT:
-{{
+{{{{
     "identified_rfp_filename": "main_solicitation.pdf",
     "confidence_level": "high",
     "reasoning": "Contains solicitation number, complete SOW, evaluation criteria, and federal document structure indicating official RFP."
-}}
+}}}}
 
 **Documents to Analyze:** {documents_with_filenames}
 
@@ -235,7 +235,9 @@ summary_and_budget_template: str = """You are an expert government contracting c
 
 ## OUTPUT FORMAT:
 
-{{
+Provide your response in this exact JSON format (no markdown, just raw JSON):
+
+{{{{
     "rfp_summary": [
         "Contract objective and scope with performance requirements",
         "Key deliverables and compliance/certification needs",
@@ -243,13 +245,13 @@ summary_and_budget_template: str = """You are an expert government contracting c
         "Timeline, oversight, and government interaction level",
         "Cost drivers and complexity factors"
     ],
-    "estimated_cost": {
+    "estimated_cost": {{{{
         "range_low": 350000,
         "range_high": 950000,
         "confidence_level": "medium",
         "basis_of_estimate": "Labor hours estimation, compliance costs, market rates, key assumptions, and factors affecting range/confidence"
-    }
-}}
+    }}}}
+}}}}
 
 **RFP Content:** {rfp_text}
 
