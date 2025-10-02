@@ -360,14 +360,12 @@ class RFPWorkflowService:
         self,
         project_id: str,
         rfp_file_urls: List[str],
-        proposal_file_urls: List[str] = None,
     ) -> Dict:
         """Summarize RFP and estimate cost - handles multiple documents."""
         logger.info("=" * 50)
         logger.info("STARTING MULTI-DOCUMENT RFP SUMMARIZATION AND COST ESTIMATION")
         logger.info("=" * 50)
         logger.info(f"RFP files: {rfp_file_urls}")
-        logger.info(f"Proposal files: {proposal_file_urls}")
         logger.info(f"Project ID: {project_id}")
 
         if not rfp_file_urls:
@@ -422,54 +420,10 @@ class RFPWorkflowService:
                     detail="Failed to process any RFP files",
                 )
 
-            # Download and process proposal files (optional)
-            proposal_documents = []
-            if proposal_file_urls:
-                for i, proposal_url in enumerate(proposal_file_urls):
-                    try:
-                        proposal_ext = self._get_ext_from_url(proposal_url)
-                        proposal_safe_name = self._get_safe_filename(
-                            proposal_url, f"proposal_{i + 1}"
-                        )
-                        proposal_file_path = (
-                            f"{project_dir}/{proposal_safe_name}{proposal_ext}"
-                        )
-                        downloaded_files.append(proposal_file_path)
-
-                        # Download proposal file from S3
-                        logger.info(f"Downloading proposal file {i + 1} from S3...")
-                        self.boto_service.download_user_file(
-                            public_url=proposal_url,
-                            download_path=proposal_file_path,
-                        )
-
-                        # Validate file exists
-                        if not Path(proposal_file_path).exists():
-                            logger.warning(
-                                f"Proposal file not found: {proposal_file_path}"
-                            )
-                            continue
-
-                        # Extract text
-                        logger.info(f"Extracting text from proposal file {i + 1}...")
-                        proposal_text = self.doc_processor.extract_rfp_text(
-                            proposal_file_path
-                        )
-
-                        # Get just the filename for identification
-                        filename = Path(proposal_file_path).name
-                        proposal_documents.append((filename, proposal_text))
-
-                    except Exception as e:
-                        logger.warning(
-                            f"Failed to process proposal file {proposal_url}: {e}"
-                        )
-                        continue
-
             # Analyze documents and get summary
             logger.info("Analyzing documents with LLM...")
             result = self.summary_service.summarize_multiple_docs_and_estimate_cost(
-                rfp_documents, proposal_documents if proposal_documents else None
+                rfp_documents
             )
 
             logger.info("=" * 50)

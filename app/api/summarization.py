@@ -50,15 +50,12 @@ async def summarize_rfp(
         logger.info(
             f"Received summarization request for RFP files: {request.rfp_file_urls}"
         )
-        if request.proposal_file_urls:
-            logger.info(f"Proposal files: {request.proposal_file_urls}")
         project_id = str(uuid.uuid4())
 
         # Call the workflow service
         result = workflow_service.summarize_rfp(
             project_id=project_id,
             rfp_file_urls=request.rfp_file_urls,
-            proposal_file_urls=request.proposal_file_urls or [],
         )
 
         # Check if there was an error in the summarization

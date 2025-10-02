@@ -1,8 +1,9 @@
-from fastapi import APIRouter, HTTPException
 import logging
 import uuid
 
-from ..models.requests import ScoreProposalRequest, ScoreProposalResponse, ErrorResponse
+from fastapi import APIRouter, HTTPException
+
+from ..models.requests import ErrorResponse, ScoreProposalRequest, ScoreProposalResponse
 from ..services.rfp_workflow_service import RFPWorkflowService
 
 logger = logging.getLogger(__name__)

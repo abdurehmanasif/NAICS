@@ -1,11 +1,12 @@
-import uuid
-from fastapi import APIRouter, HTTPException
 import logging
+import uuid
+
+from fastapi import APIRouter, HTTPException
 
 from ..models.requests import (
+    ErrorResponse,
     GenerateProposalRequest,
     GenerateProposalResponse,
-    ErrorResponse,
 )
 from ..services.rfp_workflow_service import RFPWorkflowService
 

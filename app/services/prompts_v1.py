@@ -344,7 +344,6 @@ You are an expert government contracting cost analyst with 15+ years of experien
 
 <context>
 MAIN RFP DOCUMENT: {rfp_text}
-SUPPORTING PROPOSAL DOCUMENTS: {proposal_text}
 </context>
 
 <analysis_objectives>

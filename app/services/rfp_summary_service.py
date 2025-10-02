@@ -7,7 +7,7 @@ from langchain.chat_models import init_chat_model
 from langchain.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
-from app.services.prompts import (
+from app.services.prompts_v2 import (
     rfp_identification_template,
     summary_and_budget_template,
 )
@@ -180,7 +180,6 @@ class RFPSummaryService:
     def summarize_multiple_docs_and_estimate_cost(
         self,
         rfp_documents: List[Tuple[str, str]],
-        proposal_documents: List[Tuple[str, str]] = None,
     ) -> Dict:
         """Identify main RFP from multiple documents, then summarize and estimate cost."""
         logger.info("Starting multi-document RFP analysis")
@@ -224,19 +223,10 @@ class RFPSummaryService:
                 },
             }
 
-        # Step 3: Prepare proposal text (combine all proposal documents)
-        proposal_text = ""
-        if proposal_documents:
-            proposal_texts = []
-            for filename, content in proposal_documents:
-                if content and content.strip():
-                    proposal_texts.append(f"Document: {filename}\n{content}")
-            proposal_text = "\n\n".join(proposal_texts)
+        # Step 3: Summarize and estimate cost
+        summary_result = self.summarize_rfp_and_estimate_cost(rfp_text)
 
-        # Step 4: Summarize and estimate cost
-        summary_result = self.summarize_rfp_and_estimate_cost(rfp_text, proposal_text)
-
-        # Step 5: Add identification info to result
+        # Step 4: Add identification info to result
         result = {
             "identified_rfp_filename": identified_filename,
             "rfp_summary": summary_result["rfp_summary"],
@@ -251,12 +241,10 @@ class RFPSummaryService:
     def summarize_rfp_and_estimate_cost(
         self,
         rfp_text: str,
-        proposal_text: str = "",
     ) -> Dict:
         """Summarize RFP and estimate cost with single LLM call."""
         logger.info("Starting RFP summarization and cost estimation")
         logger.info(f"RFP text length: {len(rfp_text)} characters")
-        logger.info(f"Proposal text length: {len(proposal_text)} characters")
 
         # Validate inputs
         if not rfp_text or not rfp_text.strip():
@@ -274,7 +262,6 @@ class RFPSummaryService:
         prompt = PromptTemplate(
             input_variables=[
                 "rfp_text",
-                "proposal_text",
             ],
             template=summary_and_budget_template,
         )
@@ -284,16 +271,13 @@ class RFPSummaryService:
         try:
             # Truncate inputs to avoid token limits
             rfp_truncated = rfp_text[:8000]
-            proposal_truncated = proposal_text[:4000] if proposal_text else ""
 
             logger.info(f"Truncated RFP length: {len(rfp_truncated)}")
-            logger.info(f"Truncated proposal length: {len(proposal_truncated)}")
 
             logger.info("Invoking LLM for RFP summarization and cost estimation...")
             response = chain.invoke(
                 {
                     "rfp_text": rfp_truncated,
-                    "proposal_text": proposal_truncated,
                 }
             )
 

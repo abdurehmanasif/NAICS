@@ -7,7 +7,7 @@ from langchain.chat_models import init_chat_model
 from langchain.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
-from app.services.prompts import scoring_template
+from app.services.prompts_v2 import scoring_template
 
 from ..config import (
     DEFAULT_LLM_MODEL_GOOGLE,
@@ -49,8 +49,8 @@ class ProposalScorerService:
         self,
         rfp_text: str,
         proposal_text: str,
-        naics_code: str = None,
-        naics_code_description: str = None,
+        naics_code: str = "",
+        naics_code_description: str = "",
     ) -> Dict:
         """Score proposal with single LLM call."""
         logger.info("Starting proposal scoring")

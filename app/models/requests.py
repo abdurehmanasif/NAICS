@@ -51,9 +51,6 @@ class SummarizeRFPRequest(BaseModel):
     rfp_file_urls: List[str] = Field(
         ..., description="List of HttpUrls to potential RFP files"
     )
-    proposal_file_urls: Optional[List[str]] = Field(
-        default=[], description="List of HttpUrls to proposal files (optional)"
-    )
 
 
 class RFPSummary(BaseModel):

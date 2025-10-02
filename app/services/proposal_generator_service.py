@@ -4,7 +4,7 @@ from langchain.chat_models import init_chat_model
 from langchain.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
-from app.services.prompts import doc_generation_template
+from app.services.prompts_v2 import doc_generation_template
 
 from ..config import (
     DEFAULT_LLM_MODEL_GOOGLE,
@@ -40,8 +40,8 @@ class ProposalGeneratorService:
         self,
         rfp_text: str,
         knowledge_base_text: str = "",
-        naics_code: str = None,
-        naics_code_description: str = None,
+        naics_code: str = "",
+        naics_code_description: str = "",
     ) -> str:
         """Generate proposal with single LLM call."""
 
