@@ -239,7 +239,7 @@ class RFPWorkflowService:
     def generate_proposal(
         self,
         project_id: str,
-        rfp_file_url: str,
+        rfp_file_urls: List[str],
         knowledge_base_files_urls: list = [],
         naics_code: str = "",
         naics_code_description: str = "",
@@ -248,9 +248,15 @@ class RFPWorkflowService:
         logger.info("=" * 50)
         logger.info("STARTING PROPOSAL GENERATION")
         logger.info("=" * 50)
-        logger.info(f"RFP file: {rfp_file_url}")
+        logger.info(f"RFP files: {rfp_file_urls}")
         logger.info(f"Knowledge base files: {knowledge_base_files_urls}")
         logger.info(f"Project ID: {project_id}")
+
+        if not rfp_file_urls:
+            raise HTTPException(
+                status_code=400,
+                detail="At least one RFP file URL is required",
+            )
 
         # Create project directory
         project_dir = f"{OUTPUT_DIR}/{project_id}"
@@ -258,17 +264,57 @@ class RFPWorkflowService:
 
         downloaded_files = []
         try:
-            rfp_ext = self._get_ext_from_url(rfp_file_url)
-            rfp_safe_name = self._get_safe_filename(rfp_file_url, "rfp")
-            rfp_file_path = f"{project_dir}/{rfp_safe_name}{rfp_ext}"
-            downloaded_files.append(rfp_file_path)
+            rfp_documents = []
+            for i, rfp_url in enumerate(rfp_file_urls):
+                try:
+                    rfp_ext = self._get_ext_from_url(rfp_url)
+                    rfp_safe_name = self._get_safe_filename(rfp_url, f"rfp_{i + 1}")
+                    rfp_file_path = f"{project_dir}/{rfp_safe_name}{rfp_ext}"
+                    downloaded_files.append(rfp_file_path)
 
-            # Download files from S3
-            logger.info("Downloading RFP file from S3...")
-            self.boto_service.download_user_file(
-                public_url=rfp_file_url,
-                download_path=rfp_file_path,
+                    logger.info(f"Downloading RFP file {i + 1} from S3...")
+                    self.boto_service.download_user_file(
+                        public_url=rfp_url,
+                        download_path=rfp_file_path,
+                    )
+
+                    if not Path(rfp_file_path).exists():
+                        logger.error(f"RFP file not found: {rfp_file_path}")
+                        continue
+
+                    logger.info(f"Extracting text from RFP file {i + 1}...")
+                    rfp_text = self.doc_processor.extract_rfp_text(rfp_file_path)
+
+                    filename = Path(rfp_file_path).name
+                    rfp_documents.append((filename, rfp_text))
+
+                except Exception as e:
+                    logger.warning(f"Failed to process RFP file {rfp_url}: {e}")
+                    continue
+
+            if not rfp_documents:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Failed to process any RFP files",
+                )
+
+            identification_result = self.summary_service.identify_main_rfp(
+                rfp_documents
             )
+            identified_filename = identification_result["identified_rfp_filename"]
+
+            rfp_text = ""
+            for filename, content in rfp_documents:
+                if filename == identified_filename:
+                    rfp_text = content
+                    break
+
+            if not rfp_text:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Could not find content for identified RFP: {identified_filename}",
+                )
+
             kb_file_paths = []
             for i, kb_file_url in enumerate(knowledge_base_files_urls):
                 logger.info(
@@ -286,10 +332,6 @@ class RFPWorkflowService:
                     download_path=kb_file_path,
                 )
                 kb_file_paths.append(kb_file_path)
-
-            # Extract RFP text
-            logger.info("Extracting RFP text...")
-            rfp_text = self.doc_processor.extract_rfp_text(rfp_file_path)
 
             # Extract knowledge base text if provided
             kb_text = ""

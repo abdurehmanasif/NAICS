@@ -26,7 +26,9 @@ class ScoreProposalResponse(BaseModel):
 class GenerateProposalRequest(BaseModel):
     """Request schema for proposal generation API"""
 
-    rfp_file_url: str = Field(..., description="HttpUrl to the RFP file")
+    rfp_file_urls: List[str] = Field(
+        ..., description="List of HttpUrls to the RFP files"
+    )
     knowledge_base_files_urls: Optional[List[str]] = Field(
         default=[], description="List of HttpUrls to the knowledge base files"
     )

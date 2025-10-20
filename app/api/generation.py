@@ -41,14 +41,14 @@ async def generate_proposal(
     """
     try:
         workflow_service = RFPWorkflowService()
-        logger.info(f"Received generation request for RFP: {request.rfp_file_url}")
+        logger.info(f"Received generation request for RFP: {request.rfp_file_urls}")
         logger.info(f"Knowledge base files: {request.knowledge_base_files_urls}")
         project_id = str(uuid.uuid4())
 
         # Call the workflow service
         public_url = workflow_service.generate_proposal(
             project_id=project_id,
-            rfp_file_url=request.rfp_file_url,
+            rfp_file_urls=request.rfp_file_urls,
             knowledge_base_files_urls=request.knowledge_base_files_urls or [],
             naics_code=request.naics_code or "",
             naics_code_description=request.naics_code_description or "",
