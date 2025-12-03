@@ -37,10 +37,10 @@ async def score_proposal(request: ScoreProposalRequest) -> ScoreProposalResponse
         logger.info(
             f"Received scoring request for RFP: {request.rfp_file_url}, Proposal: {request.proposal_file_url}"
         )
-        project_id = uuid.uuid4()
+        project_id = str(uuid.uuid4())
 
-        # Call the workflow service
-        result = workflow_service.score_proposal(
+        # Call the async workflow service
+        result = await workflow_service.score_proposal(
             project_id=project_id,
             rfp_file_url=request.rfp_file_url,
             proposal_file_url=request.proposal_file_url,

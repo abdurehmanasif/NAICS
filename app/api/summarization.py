@@ -52,8 +52,8 @@ async def summarize_rfp(
         )
         project_id = str(uuid.uuid4())
 
-        # Call the workflow service
-        result = workflow_service.summarize_rfp(
+        # Call the async workflow service
+        result = await workflow_service.summarize_rfp(
             project_id=project_id,
             rfp_file_urls=request.rfp_file_urls,
         )

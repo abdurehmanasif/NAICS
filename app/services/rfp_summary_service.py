@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 
 class RFPSummaryService:
-    """Service for summarizing RFPs and estimating costs."""
+    """Async service for summarizing RFPs and estimating costs."""
 
     def __init__(self):
         logger.info(f"Initializing RFPSummaryService with provider: {LLM_PROVIDER}")
@@ -48,10 +48,10 @@ class RFPSummaryService:
 
         logger.info("RFPSummaryService initialized successfully")
 
-    def identify_main_rfp(
+    async def identify_main_rfp(
         self, documents_with_filenames: List[Tuple[str, str]]
     ) -> Dict:
-        """Identify which document is the main RFP from a list of documents."""
+        """Async: Identify which document is the main RFP from a list of documents."""
         logger.info("Starting RFP identification")
         logger.info(f"Number of documents to analyze: {len(documents_with_filenames)}")
 
@@ -71,10 +71,8 @@ class RFPSummaryService:
                 "reasoning": "Only one document provided",
             }
 
-        # Format documents for LLM analysis
         formatted_docs = ""
         for filename, content in documents_with_filenames:
-            # Truncate content to avoid token limits
             truncated_content = content[:2000] if content else ""
             formatted_docs += (
                 f"\n\nFILENAME: {filename}\nCONTENT:\n{truncated_content}\n"
@@ -90,21 +88,18 @@ class RFPSummaryService:
 
         try:
             logger.info("Invoking LLM for RFP identification...")
-            response = chain.invoke({"documents_with_filenames": formatted_docs})
+            response = await chain.ainvoke({"documents_with_filenames": formatted_docs})
 
             logger.info("Raw LLM response for identification received")
             logger.info(f"Response: {response}")
 
-            # Parse JSON response
             result = self._parse_identification_response(response)
 
-            # Validate that the identified filename exists in our documents
             filenames = [doc[0] for doc in documents_with_filenames]
             if result["identified_rfp_filename"] not in filenames:
                 logger.warning(
                     f"LLM identified filename not in document list: {result['identified_rfp_filename']}"
                 )
-                # Default to first document
                 result["identified_rfp_filename"] = filenames[0]
                 result["confidence_level"] = "low"
                 result["reasoning"] = (
@@ -116,7 +111,6 @@ class RFPSummaryService:
 
         except Exception as e:
             logger.error(f"Error identifying RFP: {e}", exc_info=True)
-            # Default to first document
             return {
                 "identified_rfp_filename": documents_with_filenames[0][0],
                 "confidence_level": "low",
@@ -128,7 +122,6 @@ class RFPSummaryService:
         if not response:
             raise ValueError("Empty response from LLM")
 
-        # Method 1: Direct JSON parsing
         try:
             result = json.loads(response.strip())
             logger.info("Successfully parsed identification JSON directly")
@@ -136,7 +129,6 @@ class RFPSummaryService:
         except json.JSONDecodeError as e:
             logger.warning(f"Direct JSON parsing failed: {e}")
 
-        # Method 2: Extract JSON using regex
         try:
             json_match = re.search(
                 r'\{[^{}]*"identified_rfp_filename"[^{}]*\}',
@@ -151,7 +143,6 @@ class RFPSummaryService:
         except (json.JSONDecodeError, AttributeError) as e:
             logger.warning(f"Regex JSON extraction failed: {e}")
 
-        # Fallback
         logger.error("Failed to parse identification response")
         raise ValueError(f"Could not parse identification response: {response}")
 
@@ -160,7 +151,6 @@ class RFPSummaryService:
         if not isinstance(result, dict):
             raise ValueError(f"Result is not a dictionary: {type(result)}")
 
-        # Ensure required fields exist
         if "identified_rfp_filename" not in result:
             result["identified_rfp_filename"] = ""
 
@@ -170,18 +160,17 @@ class RFPSummaryService:
         if "reasoning" not in result:
             result["reasoning"] = "No reasoning provided"
 
-        # Validate confidence level
         valid_confidence = ["low", "medium", "high"]
         if result["confidence_level"] not in valid_confidence:
             result["confidence_level"] = "low"
 
         return result
 
-    def summarize_multiple_docs_and_estimate_cost(
+    async def summarize_multiple_docs_and_estimate_cost(
         self,
         rfp_documents: List[Tuple[str, str]],
     ) -> Dict:
-        """Identify main RFP from multiple documents, then summarize and estimate cost."""
+        """Async: Identify main RFP from multiple documents, then summarize and estimate cost."""
         logger.info("Starting multi-document RFP analysis")
 
         if not rfp_documents:
@@ -197,11 +186,9 @@ class RFPSummaryService:
                 },
             }
 
-        # Step 1: Identify the main RFP
-        identification_result = self.identify_main_rfp(rfp_documents)
+        identification_result = await self.identify_main_rfp(rfp_documents)
         identified_filename = identification_result["identified_rfp_filename"]
 
-        # Step 2: Get the content of the identified RFP
         rfp_text = ""
         for filename, content in rfp_documents:
             if filename == identified_filename:
@@ -223,10 +210,8 @@ class RFPSummaryService:
                 },
             }
 
-        # Step 3: Summarize and estimate cost
-        summary_result = self.summarize_rfp_and_estimate_cost(rfp_text)
+        summary_result = await self.summarize_rfp_and_estimate_cost(rfp_text)
 
-        # Step 4: Add identification info to result
         result = {
             "identified_rfp_filename": identified_filename,
             "rfp_summary": summary_result["rfp_summary"],
@@ -238,15 +223,14 @@ class RFPSummaryService:
         )
         return result
 
-    def summarize_rfp_and_estimate_cost(
+    async def summarize_rfp_and_estimate_cost(
         self,
         rfp_text: str,
     ) -> Dict:
-        """Summarize RFP and estimate cost with single LLM call."""
+        """Async: Summarize RFP and estimate cost with single LLM call using ainvoke."""
         logger.info("Starting RFP summarization and cost estimation")
         logger.info(f"RFP text length: {len(rfp_text)} characters")
 
-        # Validate inputs
         if not rfp_text or not rfp_text.strip():
             logger.error("RFP text is empty or None")
             return {
@@ -260,33 +244,25 @@ class RFPSummaryService:
             }
 
         prompt = PromptTemplate(
-            input_variables=[
-                "rfp_text",
-            ],
+            input_variables=["rfp_text"],
             template=summary_and_budget_template,
         )
 
         chain = prompt | self.llm | StrOutputParser()
 
         try:
-            # Truncate inputs to avoid token limits
             rfp_truncated = rfp_text[:8000]
 
             logger.info(f"Truncated RFP length: {len(rfp_truncated)}")
 
             logger.info("Invoking LLM for RFP summarization and cost estimation...")
-            response = chain.invoke(
-                {
-                    "rfp_text": rfp_truncated,
-                }
-            )
+            response = await chain.ainvoke({"rfp_text": rfp_truncated})
 
             logger.info("Raw LLM response received")
             logger.info(f"Response type: {type(response)}")
             logger.info(f"Response length: {len(str(response))}")
             logger.info(f"Raw response: {repr(response)}")
 
-            # Clean and parse JSON response
             result = self._parse_json_response(response)
 
             logger.info(f"Parsed result: {result}")
@@ -311,7 +287,6 @@ class RFPSummaryService:
             logger.error("Empty response from LLM")
             raise ValueError("Empty response from LLM")
 
-        # Method 1: Direct JSON parsing
         try:
             result = json.loads(response.strip())
             logger.info("Successfully parsed JSON directly")
@@ -319,9 +294,7 @@ class RFPSummaryService:
         except json.JSONDecodeError as e:
             logger.warning(f"Direct JSON parsing failed: {e}")
 
-        # Method 2: Extract JSON from response using regex
         try:
-            # Look for JSON object with rfp_summary and estimated_cost fields
             json_match = re.search(
                 r'\{[^{}]*"rfp_summary"[^{}]*"estimated_cost"[^{}]*\}',
                 response,
@@ -336,25 +309,20 @@ class RFPSummaryService:
         except (json.JSONDecodeError, AttributeError) as e:
             logger.warning(f"Regex JSON extraction failed: {e}")
 
-        # Method 3: Fallback - try to extract components manually
         try:
-            # Extract rfp_summary array
             rfp_summary_match = re.search(
                 r'"rfp_summary"\s*:\s*\[([^\]]*)\]', response, re.DOTALL
             )
 
-            # Extract estimated_cost object
             cost_match = re.search(
                 r'"estimated_cost"\s*:\s*\{([^{}]*)\}', response, re.DOTALL
             )
 
             if rfp_summary_match and cost_match:
-                # Parse rfp_summary
                 summary_content = rfp_summary_match.group(1)
                 summary_items = re.findall(r'"([^"]*)"', summary_content)
                 rfp_summary = [item.strip() for item in summary_items if item.strip()]
 
-                # Parse estimated_cost
                 cost_content = cost_match.group(1)
                 range_low_match = re.search(r'"range_low"\s*:\s*(\d+)', cost_content)
                 range_high_match = re.search(r'"range_high"\s*:\s*(\d+)', cost_content)
@@ -387,7 +355,6 @@ class RFPSummaryService:
         except Exception as e:
             logger.warning(f"Manual extraction failed: {e}")
 
-        # Method 4: Final fallback - create default response
         logger.error("All parsing methods failed, using default response")
         logger.error(f"Problematic response: {repr(response)}")
 
@@ -408,19 +375,16 @@ class RFPSummaryService:
         if not isinstance(result, dict):
             raise ValueError(f"Result is not a dictionary: {type(result)}")
 
-        # Validate rfp_summary
         if "rfp_summary" not in result:
             result["rfp_summary"] = ["No summary available"]
 
         if not isinstance(result["rfp_summary"], list):
             result["rfp_summary"] = [str(result["rfp_summary"])]
 
-        # Ensure summary items are strings and not empty
         result["rfp_summary"] = [
             str(item).strip() for item in result["rfp_summary"] if str(item).strip()
         ]
 
-        # Validate estimated_cost
         if "estimated_cost" not in result:
             result["estimated_cost"] = {
                 "range_low": 0,
@@ -438,14 +402,12 @@ class RFPSummaryService:
                 "basis_of_estimate": "Invalid cost estimate format",
             }
 
-        # Validate and sanitize cost ranges
         try:
             range_low = int(cost_estimate.get("range_low", 0))
             range_high = int(cost_estimate.get("range_high", 0))
 
-            # Ensure ranges are non-negative and logical
             range_low = max(0, range_low)
-            range_high = max(range_low, range_high)  # Ensure high >= low
+            range_high = max(range_low, range_high)
 
             cost_estimate["range_low"] = range_low
             cost_estimate["range_high"] = range_high
@@ -453,14 +415,12 @@ class RFPSummaryService:
             cost_estimate["range_low"] = 0
             cost_estimate["range_high"] = 0
 
-        # Validate confidence level
         valid_confidence = ["low", "medium", "high"]
         confidence = cost_estimate.get("confidence_level", "low")
         if confidence not in valid_confidence:
             confidence = "low"
         cost_estimate["confidence_level"] = confidence
 
-        # Ensure basis_of_estimate is a string
         if not isinstance(cost_estimate.get("basis_of_estimate"), str):
             cost_estimate["basis_of_estimate"] = "No basis provided"
 

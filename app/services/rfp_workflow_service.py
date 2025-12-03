@@ -1,11 +1,13 @@
+import asyncio
 import logging
 import mimetypes
 import os
 import re
 import urllib.parse
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 from docx import Document
 from fastapi import HTTPException
@@ -19,13 +21,16 @@ from .rfp_summary_service import RFPSummaryService
 
 logger = logging.getLogger(__name__)
 
-DOCX = ".docx"
+DOCX_EXT = ".docx"
 PDF = ".pdf"
 DOC = ".doc"
 
+# Thread pool for blocking file I/O operations
+_executor = ThreadPoolExecutor(max_workers=int(os.getenv("THREAD_POOL_SIZE", "4")))
+
 
 class RFPWorkflowService:
-    """Simplified RFP workflow with minimal LLM calls."""
+    """Async RFP workflow with parallel processing support."""
 
     def __init__(self):
         logger.info("Initializing RFPWorkflowService")
@@ -37,50 +42,37 @@ class RFPWorkflowService:
         logger.info("RFPWorkflowService initialized successfully")
 
     def _get_ext_from_url(self, url: str) -> str:
-        """
-        Extract file extension from URL, handling S3 URLs and common cases.
-        """
+        """Extract file extension from URL, handling S3 URLs and common cases."""
         try:
-            # Parse URL and remove query parameters
             parsed_url = urllib.parse.urlparse(url)
             clean_path = urllib.parse.unquote(parsed_url.path)
 
-            # Get extension from clean path
             ext = Path(clean_path).suffix.lower()
 
-            # Check if we have a supported extension
-            supported_extensions = {PDF, DOCX, DOC}
+            supported_extensions = {PDF, DOCX_EXT, DOC}
             if ext in supported_extensions:
                 logger.debug(f"Found extension {ext} from URL path")
                 return ext
 
-            # Try mimetype guessing on the clean path
             mime, _ = mimetypes.guess_type(clean_path)
             if mime:
                 logger.debug(f"Detected MIME type: {mime}")
                 if "pdf" in mime.lower():
                     return PDF
-                elif (
-                    "wordprocessingml" in mime.lower()
-                    or "openxmlformats" in mime.lower()
-                ):
-                    return DOCX
+                elif "wordprocessingml" in mime.lower() or "openxmlformats" in mime.lower():
+                    return DOCX_EXT
                 elif "msword" in mime.lower():
                     return DOC
 
-            # Check if filename is in query parameters
             if "filename=" in url:
                 filename_match = re.search(r"filename=([^&]+)", url)
                 if filename_match:
                     filename = urllib.parse.unquote(filename_match.group(1))
                     param_ext = Path(filename).suffix.lower()
                     if param_ext in supported_extensions:
-                        logger.debug(
-                            f"Found extension {param_ext} from filename parameter"
-                        )
+                        logger.debug(f"Found extension {param_ext} from filename parameter")
                         return param_ext
 
-            # If path suggests a document, default to docx
             if any(
                 keyword in clean_path.lower()
                 for keyword in ["proposal", "rfp", "document", "doc"]
@@ -88,9 +80,8 @@ class RFPWorkflowService:
                 logger.warning(
                     f"No extension found for {url}, defaulting to .docx based on path content"
                 )
-                return DOCX
+                return DOCX_EXT
 
-            # If all else fails, raise an error instead of guessing
             raise ValueError(f"Cannot determine supported file type from URL: {url}")
 
         except Exception as e:
@@ -98,22 +89,17 @@ class RFPWorkflowService:
             raise ValueError(f"Error processing URL {url}: {e}")
 
     def _get_safe_filename(self, url: str, prefix: str = "file") -> str:
-        """
-        Generate a safe filename from URL, handling encoding and special characters.
-        """
+        """Generate a safe filename from URL, handling encoding and special characters."""
         try:
             parsed_url = urllib.parse.urlparse(url)
             clean_path = urllib.parse.unquote(parsed_url.path)
 
-            # Get the filename without extension
             filename = Path(clean_path).stem
 
-            # Clean the filename to make it filesystem-safe
             safe_filename = re.sub(r'[<>:"/\\|?*]', "_", filename)
             safe_filename = re.sub(r"\s+", "_", safe_filename)
             safe_filename = safe_filename.strip("._")
 
-            # Ensure filename isn't empty and isn't too long
             if not safe_filename or len(safe_filename) < 3:
                 safe_filename = f"{prefix}_{uuid.uuid4().hex[:8]}"
             elif len(safe_filename) > 100:
@@ -124,7 +110,56 @@ class RFPWorkflowService:
         except Exception:
             return f"{prefix}_{uuid.uuid4().hex[:8]}"
 
-    def score_proposal(
+    async def _download_file(self, url: str, download_path: str) -> bool:
+        """Download a single file from S3."""
+        return await self.boto_service.download_user_file(
+            public_url=url, download_path=download_path
+        )
+
+    async def _download_and_extract(
+        self, url: str, project_dir: str, prefix: str, index: int
+    ) -> Tuple[str, str, str]:
+        """Download file and extract text. Returns (filename, text, file_path)."""
+        file_path = ""
+        try:
+            ext = self._get_ext_from_url(url)
+            safe_name = self._get_safe_filename(url, f"{prefix}_{index + 1}")
+            file_path = f"{project_dir}/{safe_name}{ext}"
+
+            logger.info(f"Downloading {prefix} file {index + 1} from S3...")
+            success = await self.boto_service.download_user_file(
+                public_url=url, download_path=file_path
+            )
+
+            if not success or not Path(file_path).exists():
+                logger.error(f"Failed to download file: {url}")
+                return ("", "", file_path)
+
+            logger.info(f"Extracting text from {prefix} file {index + 1}...")
+            text = await self.doc_processor.extract_rfp_text(file_path)
+
+            filename = Path(file_path).name
+            return (filename, text, file_path)
+
+        except Exception as e:
+            logger.warning(f"Failed to process {prefix} file {url}: {e}")
+            return ("", "", file_path)
+
+    async def _create_docx_in_executor(
+        self, content: str, output_path: str
+    ) -> None:
+        """Create DOCX file in thread executor to avoid blocking."""
+        loop = asyncio.get_event_loop()
+
+        def _create_docx():
+            document = Document()
+            for paragraph in content.split("\n\n"):
+                document.add_paragraph(paragraph)
+            document.save(output_path)
+
+        await loop.run_in_executor(_executor, _create_docx)
+
+    async def score_proposal(
         self,
         project_id: str,
         rfp_file_url: str,
@@ -132,7 +167,7 @@ class RFPWorkflowService:
         naics_code: str = "",
         naics_code_description: str = "",
     ) -> Dict:
-        """Score proposal - single LLM call."""
+        """Async: Score proposal with parallel file downloads."""
         logger.info("=" * 50)
         logger.info("STARTING PROPOSAL SCORING")
         logger.info("=" * 50)
@@ -142,7 +177,6 @@ class RFPWorkflowService:
         logger.info(f"NAICS code description: {naics_code_description}")
         logger.info(f"Project ID: {project_id}")
 
-        # Create project directory
         project_dir = f"{OUTPUT_DIR}/{project_id}"
         os.makedirs(project_dir, exist_ok=True)
         rfp_file_path = None
@@ -152,46 +186,42 @@ class RFPWorkflowService:
             rfp_ext = self._get_ext_from_url(rfp_file_url)
             proposal_ext = self._get_ext_from_url(proposal_file_url)
 
-            # Create safe filenames
             rfp_safe_name = self._get_safe_filename(rfp_file_url, "rfp")
             proposal_safe_name = self._get_safe_filename(proposal_file_url, "proposal")
 
             rfp_file_path = f"{project_dir}/{rfp_safe_name}{rfp_ext}"
             proposal_file_path = f"{project_dir}/{proposal_safe_name}{proposal_ext}"
 
-            # Download files from S3
-            logger.info("Downloading RFP file from S3...")
-            self.boto_service.download_user_file(
-                public_url=rfp_file_url,
-                download_path=rfp_file_path,
-            )
-            logger.info("Downloading proposal file from S3...")
-            self.boto_service.download_user_file(
-                public_url=proposal_file_url,
-                download_path=proposal_file_path,
+            # Parallel download of both files
+            logger.info("Downloading RFP and proposal files in parallel...")
+            download_results = await asyncio.gather(
+                self._download_file(rfp_file_url, rfp_file_path),
+                self._download_file(proposal_file_url, proposal_file_path),
             )
 
-            # Validate file paths
-            if (
-                not Path(rfp_file_path).exists()
-                or not Path(proposal_file_path).exists()
-            ):
-                logger.error(f"RFP file not found: {rfp_file_path}")
+            if not all(download_results):
                 raise HTTPException(
                     status_code=400,
-                    detail=f"RFP file not found: {rfp_file_path}",
+                    detail="Failed to download one or more files",
                 )
 
-            # Extract text from files
-            logger.info("Extracting RFP text...")
-            rfp_text = self.doc_processor.extract_rfp_text(rfp_file_path)
+            if not Path(rfp_file_path).exists() or not Path(proposal_file_path).exists():
+                logger.error("RFP or proposal file not found")
+                raise HTTPException(
+                    status_code=400,
+                    detail="RFP or proposal file not found after download",
+                )
 
-            logger.info("Extracting proposal text...")
-            proposal_text = self.doc_processor.extract_rfp_text(proposal_file_path)
+            # Parallel text extraction
+            logger.info("Extracting text from files in parallel...")
+            rfp_text, proposal_text = await asyncio.gather(
+                self.doc_processor.extract_rfp_text(rfp_file_path),
+                self.doc_processor.extract_rfp_text(proposal_file_path),
+            )
 
-            # Score with single LLM call
+            # Score with LLM
             logger.info("Scoring proposal with LLM...")
-            result = self.scorer.score_proposal(
+            result = await self.scorer.score_proposal(
                 rfp_text, proposal_text, naics_code, naics_code_description
             )
 
@@ -203,48 +233,40 @@ class RFPWorkflowService:
             if result["score"] is None or result["suggestion"] is None:
                 raise HTTPException(
                     status_code=400,
-                    detail="Scoring failed. Please try again. If the problem persists, please contact support.",
+                    detail="Scoring failed. Please try again.",
                 )
 
             logger.info("=" * 50)
-
             return result
 
         except ValueError as e:
             logger.error(f"File processing error: {e}")
-            raise HTTPException(
-                status_code=400,
-                detail=f"File processing error: {e}",
-            )
+            raise HTTPException(status_code=400, detail=f"File processing error: {e}")
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f"Error in score_proposal: {e}", exc_info=True)
-            raise HTTPException(
-                status_code=500,
-                detail=f"Error in scoring workflow: {e}",
-            )
+            raise HTTPException(status_code=500, detail=f"Error in scoring workflow: {e}")
         finally:
             try:
-                if (
-                    rfp_file_path
-                    and proposal_file_path
-                    and Path(rfp_file_path).exists()
-                    and Path(proposal_file_path).exists()
-                ):
-                    os.remove(rfp_file_path)
-                    os.remove(proposal_file_path)
+                for path in [rfp_file_path, proposal_file_path]:
+                    if path and Path(path).exists():
+                        os.remove(path)
                 logger.debug("Cleaned up temporary files")
             except Exception as cleanup_error:
                 logger.warning(f"Failed to cleanup files: {cleanup_error}")
 
-    def generate_proposal(
+    async def generate_proposal(
         self,
         project_id: str,
         rfp_file_urls: List[str],
-        knowledge_base_files_urls: list = [],
+        knowledge_base_files_urls: List[str] = None,
         naics_code: str = "",
         naics_code_description: str = "",
     ) -> str:
-        """Generate proposal - single LLM call."""
+        """Async: Generate proposal with parallel file processing."""
+        knowledge_base_files_urls = knowledge_base_files_urls or []
+
         logger.info("=" * 50)
         logger.info("STARTING PROPOSAL GENERATION")
         logger.info("=" * 50)
@@ -258,39 +280,27 @@ class RFPWorkflowService:
                 detail="At least one RFP file URL is required",
             )
 
-        # Create project directory
         project_dir = f"{OUTPUT_DIR}/{project_id}"
         os.makedirs(project_dir, exist_ok=True)
 
         downloaded_files = []
+        docx_path = None
+
         try:
+            # Parallel download and extraction of all RFP files
+            logger.info("Downloading and extracting RFP files in parallel...")
+            rfp_tasks = [
+                self._download_and_extract(url, project_dir, "rfp", i)
+                for i, url in enumerate(rfp_file_urls)
+            ]
+            rfp_results = await asyncio.gather(*rfp_tasks)
+
             rfp_documents = []
-            for i, rfp_url in enumerate(rfp_file_urls):
-                try:
-                    rfp_ext = self._get_ext_from_url(rfp_url)
-                    rfp_safe_name = self._get_safe_filename(rfp_url, f"rfp_{i + 1}")
-                    rfp_file_path = f"{project_dir}/{rfp_safe_name}{rfp_ext}"
-                    downloaded_files.append(rfp_file_path)
-
-                    logger.info(f"Downloading RFP file {i + 1} from S3...")
-                    self.boto_service.download_user_file(
-                        public_url=rfp_url,
-                        download_path=rfp_file_path,
-                    )
-
-                    if not Path(rfp_file_path).exists():
-                        logger.error(f"RFP file not found: {rfp_file_path}")
-                        continue
-
-                    logger.info(f"Extracting text from RFP file {i + 1}...")
-                    rfp_text = self.doc_processor.extract_rfp_text(rfp_file_path)
-
-                    filename = Path(rfp_file_path).name
-                    rfp_documents.append((filename, rfp_text))
-
-                except Exception as e:
-                    logger.warning(f"Failed to process RFP file {rfp_url}: {e}")
-                    continue
+            for filename, text, file_path in rfp_results:
+                if file_path:
+                    downloaded_files.append(file_path)
+                if filename and text:
+                    rfp_documents.append((filename, text))
 
             if not rfp_documents:
                 raise HTTPException(
@@ -298,7 +308,8 @@ class RFPWorkflowService:
                     detail="Failed to process any RFP files",
                 )
 
-            identification_result = self.summary_service.identify_main_rfp(
+            # Identify main RFP
+            identification_result = await self.summary_service.identify_main_rfp(
                 rfp_documents
             )
             identified_filename = identification_result["identified_rfp_filename"]
@@ -315,54 +326,47 @@ class RFPWorkflowService:
                     detail=f"Could not find content for identified RFP: {identified_filename}",
                 )
 
-            kb_file_paths = []
-            for i, kb_file_url in enumerate(knowledge_base_files_urls):
-                logger.info(
-                    f"Processing knowledge base file {i + 1}/{len(knowledge_base_files_urls)}"
-                )
-
-                kb_ext = self._get_ext_from_url(kb_file_url)
-                kb_safe_name = self._get_safe_filename(kb_file_url, f"kb_{i + 1}")
-                kb_file_path = f"{project_dir}/{kb_safe_name}{kb_ext}"
-                downloaded_files.append(kb_file_path)
-
-                logger.info("Downloading knowledge base file from S3...")
-                self.boto_service.download_user_file(
-                    public_url=kb_file_url,
-                    download_path=kb_file_path,
-                )
-                kb_file_paths.append(kb_file_path)
-
-            # Extract knowledge base text if provided
+            # Parallel download and extraction of KB files
             kb_text = ""
-            if kb_file_paths:
-                logger.info("Loading knowledge base documents...")
-                kb_docs = self.doc_processor.load_documents(kb_file_paths)
-                kb_text = "\n\n".join([doc.page_content for doc in kb_docs])
+            if knowledge_base_files_urls:
+                logger.info("Downloading and extracting KB files in parallel...")
+                kb_tasks = [
+                    self._download_and_extract(url, project_dir, "kb", i)
+                    for i, url in enumerate(knowledge_base_files_urls)
+                ]
+                kb_results = await asyncio.gather(*kb_tasks)
+
+                kb_texts = []
+                for filename, text, file_path in kb_results:
+                    if file_path:
+                        downloaded_files.append(file_path)
+                    if text:
+                        kb_texts.append(text)
+
+                kb_text = "\n\n".join(kb_texts)
                 logger.info(f"Knowledge base text length: {len(kb_text)} characters")
 
-            # Generate proposal with single LLM call
+            # Generate proposal with LLM
             logger.info("Generating proposal with LLM...")
-            proposal = self.generator.generate_proposal(
+            proposal = await self.generator.generate_proposal(
                 rfp_text, kb_text, naics_code, naics_code_description
             )
 
-            # Convert proposal text to DOCX and upload to S3
+            # Create DOCX in thread executor
             logger.info("Converting proposal to DOCX format...")
             docx_path = f"{project_dir}/generated_proposal.docx"
-            document = Document()
-            for paragraph in proposal.split("\n\n"):
-                document.add_paragraph(paragraph)
-            document.save(docx_path)
+            await self._create_docx_in_executor(proposal, docx_path)
 
+            # Upload to S3
             logger.info("Uploading generated proposal to S3...")
-            success, public_url = self.boto_service.upload_user_file(
+            success, public_url = await self.boto_service.upload_user_file(
                 file_name=docx_path,
                 user_id=str(project_id),
                 feature_name="proposal_generation",
                 project_id=str(project_id),
                 object_name=Path(docx_path).name,
             )
+
             if not success or not public_url:
                 raise HTTPException(
                     status_code=500,
@@ -378,19 +382,15 @@ class RFPWorkflowService:
 
         except ValueError as e:
             logger.error(f"File processing error: {e}")
-            raise HTTPException(
-                status_code=400,
-                detail=f"File processing error: {e}",
-            )
+            raise HTTPException(status_code=400, detail=f"File processing error: {e}")
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f"Error in generate_proposal: {e}", exc_info=True)
-            raise HTTPException(
-                status_code=500,
-                detail=f"Error in generate_proposal: {e}",
-            )
+            raise HTTPException(status_code=500, detail=f"Error in generate_proposal: {e}")
         finally:
-            # Clean up downloaded files and generated docx
-            for file_path in downloaded_files + [locals().get("docx_path")]:
+            cleanup_files = downloaded_files + ([docx_path] if docx_path else [])
+            for file_path in cleanup_files:
                 try:
                     if file_path and Path(file_path).exists():
                         os.remove(file_path)
@@ -398,12 +398,12 @@ class RFPWorkflowService:
                 except Exception as cleanup_error:
                     logger.warning(f"Failed to cleanup {file_path}: {cleanup_error}")
 
-    def summarize_rfp(
+    async def summarize_rfp(
         self,
         project_id: str,
         rfp_file_urls: List[str],
     ) -> Dict:
-        """Summarize RFP and estimate cost - handles multiple documents."""
+        """Async: Summarize RFP with parallel file processing."""
         logger.info("=" * 50)
         logger.info("STARTING MULTI-DOCUMENT RFP SUMMARIZATION AND COST ESTIMATION")
         logger.info("=" * 50)
@@ -416,45 +416,26 @@ class RFPWorkflowService:
                 detail="At least one RFP file URL is required",
             )
 
-        # Create project directory
         project_dir = f"{OUTPUT_DIR}/{project_id}"
         os.makedirs(project_dir, exist_ok=True)
 
         downloaded_files = []
 
         try:
-            # Download and process RFP files
+            # Parallel download and extraction of all RFP files
+            logger.info("Downloading and extracting RFP files in parallel...")
+            rfp_tasks = [
+                self._download_and_extract(url, project_dir, "rfp", i)
+                for i, url in enumerate(rfp_file_urls)
+            ]
+            rfp_results = await asyncio.gather(*rfp_tasks)
+
             rfp_documents = []
-            for i, rfp_url in enumerate(rfp_file_urls):
-                try:
-                    rfp_ext = self._get_ext_from_url(rfp_url)
-                    rfp_safe_name = self._get_safe_filename(rfp_url, f"rfp_{i + 1}")
-                    rfp_file_path = f"{project_dir}/{rfp_safe_name}{rfp_ext}"
-                    downloaded_files.append(rfp_file_path)
-
-                    # Download RFP file from S3
-                    logger.info(f"Downloading RFP file {i + 1} from S3...")
-                    self.boto_service.download_user_file(
-                        public_url=rfp_url,
-                        download_path=rfp_file_path,
-                    )
-
-                    # Validate file exists
-                    if not Path(rfp_file_path).exists():
-                        logger.error(f"RFP file not found: {rfp_file_path}")
-                        continue
-
-                    # Extract text
-                    logger.info(f"Extracting text from RFP file {i + 1}...")
-                    rfp_text = self.doc_processor.extract_rfp_text(rfp_file_path)
-
-                    # Get just the filename for identification
-                    filename = Path(rfp_file_path).name
-                    rfp_documents.append((filename, rfp_text))
-
-                except Exception as e:
-                    logger.warning(f"Failed to process RFP file {rfp_url}: {e}")
-                    continue
+            for filename, text, file_path in rfp_results:
+                if file_path:
+                    downloaded_files.append(file_path)
+                if filename and text:
+                    rfp_documents.append((filename, text))
 
             if not rfp_documents:
                 raise HTTPException(
@@ -462,54 +443,46 @@ class RFPWorkflowService:
                     detail="Failed to process any RFP files",
                 )
 
-            # Analyze documents and get summary
+            # Analyze documents with LLM
             logger.info("Analyzing documents with LLM...")
-            result = self.summary_service.summarize_multiple_docs_and_estimate_cost(
+            result = await self.summary_service.summarize_multiple_docs_and_estimate_cost(
                 rfp_documents
             )
 
             logger.info("=" * 50)
             logger.info("MULTI-DOCUMENT SUMMARIZATION AND COST ESTIMATION COMPLETE")
-            logger.info(
-                f"Identified RFP: {result.get('identified_rfp_filename', 'N/A')}"
-            )
+            logger.info(f"Identified RFP: {result.get('identified_rfp_filename', 'N/A')}")
             logger.info(f"Summary points: {len(result.get('rfp_summary', []))}")
             if result.get("estimated_cost"):
                 logger.info(
                     f"Cost range: ${result['estimated_cost']['range_low']} - ${result['estimated_cost']['range_high']}"
                 )
-                logger.info(
-                    f"Confidence: {result['estimated_cost']['confidence_level']}"
-                )
+                logger.info(f"Confidence: {result['estimated_cost']['confidence_level']}")
 
             if not result.get("rfp_summary") or not result.get("estimated_cost"):
                 raise HTTPException(
                     status_code=400,
-                    detail="Summarization failed. Please try again. If the problem persists, please contact support.",
+                    detail="Summarization failed. Please try again.",
                 )
 
             logger.info("=" * 50)
-
             return result
 
         except ValueError as e:
             logger.error(f"File processing error: {e}")
-            raise HTTPException(
-                status_code=400,
-                detail=f"File processing error: {e}",
-            )
+            raise HTTPException(status_code=400, detail=f"File processing error: {e}")
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f"Error in summarize_rfp: {e}", exc_info=True)
             raise HTTPException(
-                status_code=500,
-                detail=f"Error in summarization workflow: {e}",
+                status_code=500, detail=f"Error in summarization workflow: {e}"
             )
         finally:
-            try:
-                # Clean up temporary files
-                for file_path in downloaded_files:
+            for file_path in downloaded_files:
+                try:
                     if file_path and Path(file_path).exists():
                         os.remove(file_path)
                         logger.debug(f"Cleaned up: {file_path}")
-            except Exception as cleanup_error:
-                logger.warning(f"Failed to cleanup files: {cleanup_error}")
+                except Exception as cleanup_error:
+                    logger.warning(f"Failed to cleanup {file_path}: {cleanup_error}")

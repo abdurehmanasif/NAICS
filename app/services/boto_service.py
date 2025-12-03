@@ -1,9 +1,11 @@
-from botocore.exceptions import ClientError
-import boto3
 import logging
 import os
-import dotenv
 import urllib.parse
+from typing import Optional, Tuple
+
+import aioboto3
+import dotenv
+from botocore.exceptions import ClientError
 
 dotenv.load_dotenv()
 AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
@@ -17,123 +19,127 @@ if not all(required_env):
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
-# Initialize boto3 client
-s3 = boto3.client(
-    "s3",
-    aws_access_key_id=AWS_ACCESS_KEY_ID,
-    aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
-    region_name=AWS_REGION,
-)
-logger.info(f"Initialized boto3 client with bucket: {S3_BUCKET_NAME}")
+# Content type mapping for common file extensions
+CONTENT_TYPE_MAP = {
+    (".mp3", ".mpeg"): "audio/mpeg",
+    (".wav",): "audio/wav",
+    (".txt",): "text/plain",
+    (".html",): "text/html; charset=utf-8",
+    (".mp4",): "video/mp4",
+    (".mov",): "video/quicktime",
+    (".pdf",): "application/pdf",
+    (".docx",): "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    (".doc",): "application/msword",
+    (".xls",): "application/vnd.ms-excel",
+}
+
+
+def _get_content_type(file_name: str) -> str:
+    """Determine content type based on file extension."""
+    lower_name = file_name.lower()
+    for extensions, content_type in CONTENT_TYPE_MAP.items():
+        if lower_name.endswith(extensions):
+            return content_type
+    logger.warning(f"Unknown file type: {file_name}")
+    return "application/octet-stream"
 
 
 class BotoService:
+    """Async S3 service using aioboto3."""
+
     def __init__(self):
-        self.s3 = s3
+        self.session = aioboto3.Session(
+            aws_access_key_id=AWS_ACCESS_KEY_ID,
+            aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
+            region_name=AWS_REGION,
+        )
+        self.bucket_name = S3_BUCKET_NAME
+        logger.info(f"Initialized async BotoService with bucket: {self.bucket_name}")
 
-    def upload_user_file(
-        self, file_name, user_id, feature_name, project_id, object_name
-    ):
-        """Upload a file to an S3 bucket in a user-specific folder structure.
+    async def upload_user_file(
+        self,
+        file_name: str,
+        user_id: str,
+        feature_name: str,
+        project_id: str,
+        object_name: Optional[str] = None,
+    ) -> Tuple[bool, Optional[str]]:
+        """Upload a file to S3 bucket in a user-specific folder structure.
 
-        :param file_name: File to upload
-        :param bucket: Bucket to upload to
-        :param user_id: User ID to create folder with
-        :param feature_name: Feature name for categorization
-        :param project_id: Project ID for further organization
-        :param object_name: S3 object name. If not specified then file_name is used
-        :return: Tuple (Boolean success status, String public URL or None)
+        Args:
+            file_name: Local file path to upload
+            user_id: User ID to create folder with
+            feature_name: Feature name for categorization
+            project_id: Project ID for further organization
+            object_name: S3 object name. If not specified, file_name basename is used
+
+        Returns:
+            Tuple of (success status, public URL or None)
         """
-
-        # If S3 object_name was not specified, use file_name
         if object_name is None:
             object_name = os.path.basename(file_name)
 
-        # Create the full path with user_id, feature_name, and project_id as folders
         object_key = f"user_{user_id}/{feature_name}/{project_id}/{object_name}"
+        content_type = _get_content_type(file_name)
 
-        # Determine content type based on file extension
-        content_type = "application/octet-stream"  # default
         try:
-            if file_name.lower().endswith((".mp3", ".mpeg")):
-                content_type = "audio/mpeg"
-            elif file_name.lower().endswith(".wav"):
-                content_type = "audio/wav"
-            elif file_name.lower().endswith(".txt"):
-                content_type = "text/plain"
-            elif file_name.lower().endswith(".html"):
-                content_type = "text/html; charset=utf-8"
-            elif file_name.lower().endswith(".mp4"):
-                content_type = "video/mp4"
-            elif file_name.lower().endswith(".mov"):
-                content_type = "video/quicktime"
-            elif file_name.lower().endswith(".pdf"):
-                content_type = "application/pdf"
-            elif file_name.lower().endswith(".docx"):
-                content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            elif file_name.lower().endswith(".doc"):
-                content_type = "application/msword"
-            elif file_name.lower().endswith(".xls"):
-                content_type = "application/vnd.ms-excel"
-            else:
-                logger.warning(f"Unknown file type: {file_name}")
-        except Exception as e:
-            logging.error(f"Error determining content type: {e}")
-            return False, None
-        try:
-            # Upload file with public-read ACL
-            s3.upload_file(
-                file_name,
-                S3_BUCKET_NAME,
-                object_key,
-                ExtraArgs={
-                    "ContentType": content_type,
-                    "ContentDisposition": "inline",
-                },
-            )
+            async with self.session.client("s3") as s3:
+                await s3.upload_file(
+                    file_name,
+                    self.bucket_name,
+                    object_key,
+                    ExtraArgs={
+                        "ContentType": content_type,
+                        "ContentDisposition": "inline",
+                    },
+                )
 
-            # Generate the public URL
-            public_url = f"https://{S3_BUCKET_NAME}.s3.amazonaws.com/{object_key}"
+            public_url = f"https://{self.bucket_name}.s3.amazonaws.com/{object_key}"
             return True, public_url.replace("\\", "/")
 
         except ClientError as e:
-            logging.error(f"Upload failed: {e}")
+            logger.error(f"Upload failed: {e}")
+            return False, None
+        except Exception as e:
+            logger.error(f"Unexpected error during upload: {e}")
             return False, None
 
-    def download_user_file(self, public_url, download_path, bucket=S3_BUCKET_NAME):
-        """Download a file from an S3 bucket using its public URL and also private files.
+    async def download_user_file(
+        self, public_url: str, download_path: str, bucket: Optional[str] = None
+    ) -> bool:
+        """Download a file from S3 bucket using its public URL.
 
-        :param public_url: Public URL of the file to download
-        :param download_path: Local path where to save the file
-        :param bucket: Bucket to download from
-        :return: Boolean indicating success or failure
+        Args:
+            public_url: Public URL of the file to download
+            download_path: Local path where to save the file
+            bucket: Bucket to download from (defaults to configured bucket)
+
+        Returns:
+            Boolean indicating success or failure
         """
+        bucket = bucket or self.bucket_name
+
         try:
-            # Extract the object key from the public URL robustly
-            # Handles URLs like: https://bucket.s3.amazonaws.com/path/to/file.pdf
-            # and also with URL-encoded characters
             parsed = urllib.parse.urlparse(public_url)
             if not parsed.netloc or bucket not in parsed.netloc:
                 logger.error(f"Malformed or non-matching S3 URL: {public_url}")
                 return False
-            # Remove leading '/' from path
+
             object_key = parsed.path.lstrip("/")
             if not object_key:
                 logger.error(f"Could not extract object key from URL: {public_url}")
                 return False
             object_key = urllib.parse.unquote(object_key)
 
-            # Create directory if it doesn't exist
             os.makedirs(os.path.dirname(download_path), exist_ok=True)
 
             logger.info(f"Downloading file from bucket: {bucket}")
             logger.info(f"Object key: {object_key}")
             logger.info(f"Download path: {download_path}")
 
-            # Download the file
-            s3.download_file(bucket, object_key, download_path)
+            async with self.session.client("s3") as s3:
+                await s3.download_file(bucket, object_key, download_path)
 
-            # Verify download
             if os.path.exists(download_path):
                 file_size = os.path.getsize(download_path)
                 logger.info(f"Download successful. File size: {file_size} bytes")
@@ -149,19 +155,25 @@ class BotoService:
             logger.error(f"Unexpected error during download: {e}")
             return False
 
-    def delete_user_file(self, public_url, bucket=S3_BUCKET_NAME):
-        """Delete a file from an S3 bucket using its public URL.
+    async def delete_user_file(
+        self, public_url: str, bucket: Optional[str] = None
+    ) -> bool:
+        """Delete a file from S3 bucket using its public URL.
 
-        :param public_url: Public URL of the file to delete
-        :param bucket: Bucket to delete from
-        :return: Boolean indicating success or failure
+        Args:
+            public_url: Public URL of the file to delete
+            bucket: Bucket to delete from (defaults to configured bucket)
+
+        Returns:
+            Boolean indicating success or failure
         """
+        bucket = bucket or self.bucket_name
+
         try:
-            # Extract the object key from the public URL
             object_key = public_url.split(f"{bucket}.s3.amazonaws.com/")[1]
 
-            # Delete the file
-            s3.delete_object(Bucket=bucket, Key=object_key)
+            async with self.session.client("s3") as s3:
+                await s3.delete_object(Bucket=bucket, Key=object_key)
 
             return True
         except Exception as e:

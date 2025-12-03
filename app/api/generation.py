@@ -45,8 +45,8 @@ async def generate_proposal(
         logger.info(f"Knowledge base files: {request.knowledge_base_files_urls}")
         project_id = str(uuid.uuid4())
 
-        # Call the workflow service
-        public_url = workflow_service.generate_proposal(
+        # Call the async workflow service
+        public_url = await workflow_service.generate_proposal(
             project_id=project_id,
             rfp_file_urls=request.rfp_file_urls,
             knowledge_base_files_urls=request.knowledge_base_files_urls or [],
@@ -59,6 +59,8 @@ async def generate_proposal(
             message=f"Proposal successfully generated and uploaded. Access it here: {public_url}",
         )
 
+    except HTTPException:
+        raise
     except FileNotFoundError as e:
         logger.error(f"File not found: {e}")
         raise HTTPException(

@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 class ProposalScorerService:
-    """Simple proposal scorer with single LLM call."""
+    """Async proposal scorer with single LLM call."""
 
     def __init__(self):
         logger.info(f"Initializing ProposalScorerService with provider: {LLM_PROVIDER}")
@@ -45,19 +45,18 @@ class ProposalScorerService:
 
         logger.info("ProposalScorerService initialized successfully")
 
-    def score_proposal(
+    async def score_proposal(
         self,
         rfp_text: str,
         proposal_text: str,
         naics_code: str = "",
         naics_code_description: str = "",
     ) -> Dict:
-        """Score proposal with single LLM call."""
+        """Async: Score proposal with single LLM call using ainvoke."""
         logger.info("Starting proposal scoring")
         logger.info(f"RFP text length: {len(rfp_text)} characters")
         logger.info(f"Proposal text length: {len(proposal_text)} characters")
 
-        # Validate inputs
         if not rfp_text or not rfp_text.strip():
             logger.error("RFP text is empty or None")
             return {"score": 0, "suggestion": "Error: RFP text is empty"}
@@ -79,7 +78,6 @@ class ProposalScorerService:
         chain = prompt | self.llm | StrOutputParser()
 
         try:
-            # Truncate inputs to avoid token limits
             rfp_truncated = rfp_text[:8000]
             proposal_truncated = proposal_text[:12000]
 
@@ -87,7 +85,7 @@ class ProposalScorerService:
             logger.info(f"Truncated proposal length: {len(proposal_truncated)}")
 
             logger.info("Invoking LLM for scoring...")
-            response = chain.invoke(
+            response = await chain.ainvoke(
                 {
                     "rfp_text": rfp_truncated,
                     "proposal_text": proposal_truncated,
@@ -101,7 +99,6 @@ class ProposalScorerService:
             logger.info(f"Response length: {len(str(response))}")
             logger.info(f"Raw response: {repr(response)}")
 
-            # Clean and parse JSON response
             result = self._parse_json_response(response)
 
             logger.info(f"Parsed result: {result}")
@@ -185,7 +182,6 @@ class ProposalScorerService:
         if "suggestion" not in result:
             result["suggestion"] = "No suggestion provided"
 
-        # Ensure score is a number between 0-10
         try:
             score = float(result["score"])
             result["score"] = max(0, min(10, score))  # Clamp between 0-10
@@ -193,7 +189,6 @@ class ProposalScorerService:
             logger.warning(f"Invalid score format: {result['score']}, defaulting to 0")
             result["score"] = 0
 
-        # Ensure suggestion is a string
         if not isinstance(result["suggestion"], str):
             result["suggestion"] = str(result["suggestion"])
 

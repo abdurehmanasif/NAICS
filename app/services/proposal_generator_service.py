@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 class ProposalGeneratorService:
-    """Simple proposal generator with single LLM call."""
+    """Async proposal generator with single LLM call."""
 
     def __init__(self):
         if LLM_PROVIDER == "openai":
@@ -36,15 +36,14 @@ class ProposalGeneratorService:
                 api_key=GOOGLE_API_KEY,
             )
 
-    def generate_proposal(
+    async def generate_proposal(
         self,
         rfp_text: str,
         knowledge_base_text: str = "",
         naics_code: str = "",
         naics_code_description: str = "",
     ) -> str:
-        """Generate proposal with single LLM call."""
-
+        """Async: Generate proposal with single LLM call using ainvoke."""
         prompt = PromptTemplate(
             input_variables=[
                 "rfp_text",
@@ -58,7 +57,7 @@ class ProposalGeneratorService:
         chain = prompt | self.llm | StrOutputParser()
 
         try:
-            proposal = chain.invoke(
+            proposal = await chain.ainvoke(
                 {
                     "rfp_text": rfp_text[:10000],  # Limit to avoid token limits
                     "kb_text": knowledge_base_text[:8000],
@@ -66,7 +65,6 @@ class ProposalGeneratorService:
                     "naics_code_description": naics_code_description,
                 }
             )
-
             return proposal
 
         except Exception as e:

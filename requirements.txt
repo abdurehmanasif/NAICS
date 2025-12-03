@@ -20,6 +20,7 @@ uvicorn[standard]
 python-dotenv
 pydantic
 boto3
+aioboto3
 python-docx
 reportlab
 pytesseract
