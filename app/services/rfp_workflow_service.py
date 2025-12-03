@@ -30,16 +30,14 @@ _executor = ThreadPoolExecutor(max_workers=int(os.getenv("THREAD_POOL_SIZE", "4"
 
 
 class RFPWorkflowService:
-    """Async RFP workflow with parallel processing support."""
+    """RFP workflow with parallel processing support."""
 
     def __init__(self):
-        logger.info("Initializing RFPWorkflowService")
         self.doc_processor = DocumentProcessorService()
         self.scorer = ProposalScorerService()
         self.generator = ProposalGeneratorService()
         self.summary_service = RFPSummaryService()
         self.boto_service = BotoService()
-        logger.info("RFPWorkflowService initialized successfully")
 
     def _get_ext_from_url(self, url: str) -> str:
         """Extract file extension from URL, handling S3 URLs and common cases."""
@@ -167,16 +165,7 @@ class RFPWorkflowService:
         naics_code: str = "",
         naics_code_description: str = "",
     ) -> Dict:
-        """Async: Score proposal with parallel file downloads."""
-        logger.info("=" * 50)
-        logger.info("STARTING PROPOSAL SCORING")
-        logger.info("=" * 50)
-        logger.info(f"RFP file: {rfp_file_url}")
-        logger.info(f"Proposal file: {proposal_file_url}")
-        logger.info(f"NAICS code: {naics_code}")
-        logger.info(f"NAICS code description: {naics_code_description}")
-        logger.info(f"Project ID: {project_id}")
-
+        """Score proposal with parallel file downloads."""
         project_dir = f"{OUTPUT_DIR}/{project_id}"
         os.makedirs(project_dir, exist_ok=True)
         rfp_file_path = None
@@ -193,7 +182,6 @@ class RFPWorkflowService:
             proposal_file_path = f"{project_dir}/{proposal_safe_name}{proposal_ext}"
 
             # Parallel download of both files
-            logger.info("Downloading RFP and proposal files in parallel...")
             download_results = await asyncio.gather(
                 self._download_file(rfp_file_url, rfp_file_path),
                 self._download_file(proposal_file_url, proposal_file_path),
@@ -206,29 +194,21 @@ class RFPWorkflowService:
                 )
 
             if not Path(rfp_file_path).exists() or not Path(proposal_file_path).exists():
-                logger.error("RFP or proposal file not found")
                 raise HTTPException(
                     status_code=400,
                     detail="RFP or proposal file not found after download",
                 )
 
             # Parallel text extraction
-            logger.info("Extracting text from files in parallel...")
             rfp_text, proposal_text = await asyncio.gather(
                 self.doc_processor.extract_rfp_text(rfp_file_path),
                 self.doc_processor.extract_rfp_text(proposal_file_path),
             )
 
             # Score with LLM
-            logger.info("Scoring proposal with LLM...")
             result = await self.scorer.score_proposal(
                 rfp_text, proposal_text, naics_code, naics_code_description
             )
-
-            logger.info("=" * 50)
-            logger.info("SCORING COMPLETE")
-            logger.info(f"Final Score: {result['score']}/10")
-            logger.info(f"Suggestion: {result['suggestion']}")
 
             if result["score"] is None or result["suggestion"] is None:
                 raise HTTPException(
@@ -236,7 +216,6 @@ class RFPWorkflowService:
                     detail="Scoring failed. Please try again.",
                 )
 
-            logger.info("=" * 50)
             return result
 
         except ValueError as e:
@@ -252,7 +231,6 @@ class RFPWorkflowService:
                 for path in [rfp_file_path, proposal_file_path]:
                     if path and Path(path).exists():
                         os.remove(path)
-                logger.debug("Cleaned up temporary files")
             except Exception as cleanup_error:
                 logger.warning(f"Failed to cleanup files: {cleanup_error}")
 
@@ -264,15 +242,8 @@ class RFPWorkflowService:
         naics_code: str = "",
         naics_code_description: str = "",
     ) -> str:
-        """Async: Generate proposal with parallel file processing."""
+        """Generate proposal with parallel file processing."""
         knowledge_base_files_urls = knowledge_base_files_urls or []
-
-        logger.info("=" * 50)
-        logger.info("STARTING PROPOSAL GENERATION")
-        logger.info("=" * 50)
-        logger.info(f"RFP files: {rfp_file_urls}")
-        logger.info(f"Knowledge base files: {knowledge_base_files_urls}")
-        logger.info(f"Project ID: {project_id}")
 
         if not rfp_file_urls:
             raise HTTPException(
@@ -288,7 +259,6 @@ class RFPWorkflowService:
 
         try:
             # Parallel download and extraction of all RFP files
-            logger.info("Downloading and extracting RFP files in parallel...")
             rfp_tasks = [
                 self._download_and_extract(url, project_dir, "rfp", i)
                 for i, url in enumerate(rfp_file_urls)
@@ -329,7 +299,6 @@ class RFPWorkflowService:
             # Parallel download and extraction of KB files
             kb_text = ""
             if knowledge_base_files_urls:
-                logger.info("Downloading and extracting KB files in parallel...")
                 kb_tasks = [
                     self._download_and_extract(url, project_dir, "kb", i)
                     for i, url in enumerate(knowledge_base_files_urls)
@@ -344,21 +313,17 @@ class RFPWorkflowService:
                         kb_texts.append(text)
 
                 kb_text = "\n\n".join(kb_texts)
-                logger.info(f"Knowledge base text length: {len(kb_text)} characters")
 
             # Generate proposal with LLM
-            logger.info("Generating proposal with LLM...")
             proposal = await self.generator.generate_proposal(
                 rfp_text, kb_text, naics_code, naics_code_description
             )
 
             # Create DOCX in thread executor
-            logger.info("Converting proposal to DOCX format...")
             docx_path = f"{project_dir}/generated_proposal.docx"
             await self._create_docx_in_executor(proposal, docx_path)
 
             # Upload to S3
-            logger.info("Uploading generated proposal to S3...")
             success, public_url = await self.boto_service.upload_user_file(
                 file_name=docx_path,
                 user_id=str(project_id),
@@ -372,11 +337,6 @@ class RFPWorkflowService:
                     status_code=500,
                     detail="Failed to upload generated proposal to storage.",
                 )
-
-            logger.info("=" * 50)
-            logger.info("PROPOSAL GENERATION COMPLETE")
-            logger.info(f"Proposal uploaded to: {public_url}")
-            logger.info("=" * 50)
 
             return public_url
 
@@ -394,7 +354,6 @@ class RFPWorkflowService:
                 try:
                     if file_path and Path(file_path).exists():
                         os.remove(file_path)
-                        logger.debug(f"Cleaned up: {file_path}")
                 except Exception as cleanup_error:
                     logger.warning(f"Failed to cleanup {file_path}: {cleanup_error}")
 

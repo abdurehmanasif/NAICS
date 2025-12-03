@@ -31,7 +31,7 @@ _executor = ThreadPoolExecutor(max_workers=int(os.getenv("THREAD_POOL_SIZE", "4"
 
 
 class DocumentProcessorService:
-    """Handles document loading, processing, and vector store creation with async support."""
+    """Handles document loading, processing, and vector store creation."""
 
     def __init__(self):
         self.text_splitter = RecursiveCharacterTextSplitter(
@@ -59,26 +59,23 @@ class DocumentProcessorService:
         # Check if Tesseract OCR is available
         try:
             pytesseract.get_tesseract_version()
-            logger.info("Tesseract OCR is available")
         except pytesseract.TesseractNotFoundError:
             logger.warning("Tesseract OCR not found. Image processing will be limited.")
 
     async def load_documents(self, file_paths: List[str]) -> List[Document]:
-        """Async: Load documents from file paths, including multi-modal documents with OCR."""
+        """Load documents from file paths, including multi-modal documents with OCR."""
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(_executor, self._sync_load_documents, file_paths)
 
     async def extract_rfp_text(self, rfp_file_path: str) -> str:
-        """Async: Extract text from RFP document, including multi-modal documents with OCR."""
+        """Extract text from RFP document, including multi-modal documents with OCR."""
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(_executor, self._sync_extract_rfp_text, rfp_file_path)
 
     def _sync_load_documents(self, file_paths: List[str]) -> List[Document]:
-        """Sync: Load documents from file paths, including multi-modal documents with OCR."""
         return self._load_multimodal_documents(file_paths)
 
     def _sync_extract_rfp_text(self, rfp_file_path: str) -> str:
-        """Sync: Extract text from RFP document, including multi-modal documents with OCR."""
         logger.info(f"Starting RFP text extraction from: {rfp_file_path}")
 
         try:
@@ -86,16 +83,12 @@ class DocumentProcessorService:
                 logger.error(f"File not found: {rfp_file_path}")
                 raise FileNotFoundError(f"File not found: {rfp_file_path}")
 
-            logger.info(f"File exists, size: {Path(rfp_file_path).stat().st_size} bytes")
-
             documents = self._load_multimodal_documents([rfp_file_path])
             rfp_text = "\n\n".join([doc.page_content for doc in documents])
-            logger.info(f"Extracted RFP text length: {len(rfp_text)} characters")
 
             if not rfp_text.strip():
                 logger.warning("Extracted RFP text is empty!")
 
-            logger.info(f"RFP text preview: {rfp_text[:500]}...")
             return rfp_text
 
         except Exception as e:
@@ -179,9 +172,17 @@ class DocumentProcessorService:
                     if hasattr(page, "images") and page.images:
                         for img_num, image in enumerate(page.images):
                             try:
-                                cropped_page = page.within_bbox(
-                                    (image["x0"], image["top"], image["x1"], image["bottom"])
-                                )
+                                # Clamp bbox to page boundaries (handles floating-point drift)
+                                x0 = max(0, image["x0"])
+                                top = max(0, image["top"])
+                                x1 = min(page.width, image["x1"])
+                                bottom = min(page.height, image["bottom"])
+
+                                # Skip if clamped bbox is invalid
+                                if x1 <= x0 or bottom <= top:
+                                    continue
+
+                                cropped_page = page.within_bbox((x0, top, x1, bottom))
 
                                 if hasattr(cropped_page, "to_image"):
                                     image_data = cropped_page.to_image()

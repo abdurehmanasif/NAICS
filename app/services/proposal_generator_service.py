@@ -4,7 +4,7 @@ from langchain.chat_models import init_chat_model
 from langchain.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
-from app.services.prompts_v2 import doc_generation_template
+from app.services.prompts.prompts_v3 import doc_generation_template
 
 from ..config import (
     DEFAULT_LLM_MODEL_GOOGLE,
@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 class ProposalGeneratorService:
-    """Async proposal generator with single LLM call."""
+    """Proposal generator with single LLM call."""
 
     def __init__(self):
         if LLM_PROVIDER == "openai":
@@ -43,7 +43,7 @@ class ProposalGeneratorService:
         naics_code: str = "",
         naics_code_description: str = "",
     ) -> str:
-        """Async: Generate proposal with single LLM call using ainvoke."""
+        """Generate proposal with single LLM call using ainvoke."""
         prompt = PromptTemplate(
             input_variables=[
                 "rfp_text",

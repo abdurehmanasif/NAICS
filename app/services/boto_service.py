@@ -17,9 +17,7 @@ if not all(required_env):
     raise EnvironmentError("Missing one or more required AWS environment variables.")
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)
 
-# Content type mapping for common file extensions
 CONTENT_TYPE_MAP = {
     (".mp3", ".mpeg"): "audio/mpeg",
     (".wav",): "audio/wav",
@@ -40,7 +38,6 @@ def _get_content_type(file_name: str) -> str:
     for extensions, content_type in CONTENT_TYPE_MAP.items():
         if lower_name.endswith(extensions):
             return content_type
-    logger.warning(f"Unknown file type: {file_name}")
     return "application/octet-stream"
 
 
@@ -54,7 +51,6 @@ class BotoService:
             region_name=AWS_REGION,
         )
         self.bucket_name = S3_BUCKET_NAME
-        logger.info(f"Initialized async BotoService with bucket: {self.bucket_name}")
 
     async def upload_user_file(
         self,
@@ -64,18 +60,7 @@ class BotoService:
         project_id: str,
         object_name: Optional[str] = None,
     ) -> Tuple[bool, Optional[str]]:
-        """Upload a file to S3 bucket in a user-specific folder structure.
-
-        Args:
-            file_name: Local file path to upload
-            user_id: User ID to create folder with
-            feature_name: Feature name for categorization
-            project_id: Project ID for further organization
-            object_name: S3 object name. If not specified, file_name basename is used
-
-        Returns:
-            Tuple of (success status, public URL or None)
-        """
+        """Upload a file to S3 bucket in a user-specific folder structure."""
         if object_name is None:
             object_name = os.path.basename(file_name)
 
@@ -107,16 +92,7 @@ class BotoService:
     async def download_user_file(
         self, public_url: str, download_path: str, bucket: Optional[str] = None
     ) -> bool:
-        """Download a file from S3 bucket using its public URL.
-
-        Args:
-            public_url: Public URL of the file to download
-            download_path: Local path where to save the file
-            bucket: Bucket to download from (defaults to configured bucket)
-
-        Returns:
-            Boolean indicating success or failure
-        """
+        """Download a file from S3 bucket using its public URL."""
         bucket = bucket or self.bucket_name
 
         try:
@@ -158,15 +134,7 @@ class BotoService:
     async def delete_user_file(
         self, public_url: str, bucket: Optional[str] = None
     ) -> bool:
-        """Delete a file from S3 bucket using its public URL.
-
-        Args:
-            public_url: Public URL of the file to delete
-            bucket: Bucket to delete from (defaults to configured bucket)
-
-        Returns:
-            Boolean indicating success or failure
-        """
+        """Delete a file from S3 bucket using its public URL."""
         bucket = bucket or self.bucket_name
 
         try:
